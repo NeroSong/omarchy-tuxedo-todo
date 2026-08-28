@@ -28,6 +28,8 @@ Panel {
   property string statusMessage: ""
   property string todoPath: defaultTodoPath
   property bool badgeDueOnly: false
+  property bool twoLineDescriptions: false
+  property bool filterSidebarOpen: false
   property string sortMode: "sort:due"
   property string panelMode: "tasks"
   property var selectedLines: ({})
@@ -241,6 +243,7 @@ Panel {
     var savedPath = state ? String(state.todoPath || "").trim() : ""
     todoPath = savedPath.charAt(0) === "/" ? savedPath : defaultTodoPath
     badgeDueOnly = state && state.badgeDueOnly === true
+    twoLineDescriptions = state && state.twoLineDescriptions === true
     var savedSort = state ? String(state.sortMode || "") : ""
     sortMode = ["sort:due", "sort:file", "sort:priority"].indexOf(savedSort) >= 0
       ? savedSort
@@ -252,12 +255,18 @@ Panel {
       version: 1,
       todoPath: todoPath,
       badgeDueOnly: badgeDueOnly,
+      twoLineDescriptions: twoLineDescriptions,
       sortMode: sortMode
     }, null, 2) + "\n")
   }
 
   function toggleBadgeMode() {
     badgeDueOnly = !badgeDueOnly
+    saveState()
+  }
+
+  function toggleDescriptionLines() {
+    twoLineDescriptions = !twoLineDescriptions
     saveState()
   }
 
@@ -302,6 +311,7 @@ Panel {
       selectionRevision++
       editingLineNumber = 0
       panelMode = "tasks"
+      filterSidebarOpen = false
       return
     }
     todoFile.reload()
@@ -499,56 +509,164 @@ Panel {
         Keys.onEscapePressed: root.close()
       }
 
-      Flickable {
+      Row {
         visible: root.panelMode === "tasks"
         width: parent.width
         height: Style.space(34)
-        contentWidth: filterRow.implicitWidth
-        contentHeight: height
-        clip: true
-        boundsBehavior: Flickable.StopAtBounds
+        spacing: Style.space(6)
+
+        FilterChip {
+          label: "Filter"
+          selected: root.filterSidebarOpen || root.filterKind === "project" || root.filterKind === "context"
+          onActivated: root.filterSidebarOpen = !root.filterSidebarOpen
+        }
+        FilterChip { label: "Order"; selected: false; onActivated: root.cycleSortMode() }
+        FilterChip { label: "All"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
+        FilterChip { label: "Due"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
+
+        Item {
+          width: Math.max(0, parent.width - lineMode.implicitWidth - Style.space(230))
+          height: 1
+        }
 
         Row {
-          id: filterRow
-          spacing: Style.space(6)
+          id: lineMode
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(5)
 
-          FilterChip { label: "Order"; selected: false; onActivated: root.cycleSortMode() }
-          FilterChip { label: "All"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
-          FilterChip { label: "Due"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
-
-          Repeater {
-            model: root.projects
-            FilterChip {
-              required property string modelData
-              label: "+" + modelData
-              selected: root.filterKind === "project" && root.filterValue === modelData
-              onActivated: root.selectFilter("project", modelData)
-            }
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.twoLineDescriptions ? "Two lines" : "One line"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
           }
 
-          Repeater {
-            model: root.contexts
-            FilterChip {
-              required property string modelData
-              label: "@" + modelData
-              selected: root.filterKind === "context" && root.filterValue === modelData
-              onActivated: root.selectFilter("context", modelData)
-            }
+          ToggleSwitch {
+            anchors.verticalCenter: parent.verticalCenter
+            checked: root.twoLineDescriptions
+            trackHeight: Style.space(18)
+            foreground: root.foreground
+            accent: Color.accent
+            onToggled: root.toggleDescriptionLines()
           }
         }
       }
 
       Rectangle { visible: root.panelMode === "tasks"; width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
 
-      ListView {
-        id: taskList
+      Item {
+        id: taskArea
         visible: root.panelMode === "tasks"
         width: parent.width
         height: parent.height - Style.space(root.selectedCount > 0 ? 251 : 205)
-        model: root.visibleTasks
-        clip: true
-        spacing: Style.space(2)
-        boundsBehavior: Flickable.StopAtBounds
+
+        Rectangle {
+          id: filterSidebar
+          visible: root.filterSidebarOpen
+          anchors.left: parent.left
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Style.space(180)
+          radius: Style.cornerRadius
+          color: Style.normalFillFor(root.foreground, Color.accent)
+
+          Column {
+            anchors.fill: parent
+            anchors.margins: Style.space(10)
+            spacing: Style.space(8)
+
+            Row {
+              width: parent.width
+
+              Text {
+                width: parent.width - closeFilters.width
+                anchors.verticalCenter: parent.verticalCenter
+                text: "Filters"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.subtitle
+                font.bold: true
+              }
+
+              PanelActionButton {
+                id: closeFilters
+                iconText: "×"
+                tooltipText: "Close filters"
+                foreground: root.dim
+                hoverColor: root.foreground
+                onClicked: root.filterSidebarOpen = false
+              }
+            }
+
+            Flickable {
+              width: parent.width
+              height: parent.height - Style.space(32)
+              contentWidth: width
+              contentHeight: sidebarColumn.implicitHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+
+              Column {
+                id: sidebarColumn
+                width: parent.width
+                spacing: Style.space(6)
+
+                Text {
+                  width: parent.width
+                  text: "Projects"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+
+                Repeater {
+                  model: root.projects
+                  FilterChip {
+                    required property string modelData
+                    width: sidebarColumn.width
+                    label: "+" + modelData
+                    selected: root.filterKind === "project" && root.filterValue === modelData
+                    onActivated: root.selectFilter("project", modelData)
+                  }
+                }
+
+                Text {
+                  width: parent.width
+                  topPadding: Style.space(8)
+                  text: "Contexts"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.bold: true
+                }
+
+                Repeater {
+                  model: root.contexts
+                  FilterChip {
+                    required property string modelData
+                    width: sidebarColumn.width
+                    label: "@" + modelData
+                    selected: root.filterKind === "context" && root.filterValue === modelData
+                    onActivated: root.selectFilter("context", modelData)
+                  }
+                }
+              }
+            }
+          }
+        }
+
+        ListView {
+          id: taskList
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          anchors.right: parent.right
+          width: parent.width - (root.filterSidebarOpen ? filterSidebar.width + Style.space(8) : 0)
+          model: root.visibleTasks
+          clip: true
+          spacing: Style.space(2)
+          boundsBehavior: Flickable.StopAtBounds
 
         delegate: Rectangle {
           id: taskRow
@@ -556,7 +674,7 @@ Panel {
           readonly property bool selected: root.isSelected(modelData)
           readonly property bool editing: root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
-          height: Style.space(editing ? 52 : 48)
+          height: Style.space(editing ? 52 : (root.twoLineDescriptions ? 64 : 48))
           radius: Style.cornerRadius
           color: selected
             ? Style.selectedFillFor(root.foreground, Color.accent)
@@ -618,6 +736,8 @@ Panel {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
                 font.bold: modelData.priority === "A"
+                wrapMode: root.twoLineDescriptions ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: root.twoLineDescriptions ? 2 : 1
                 elide: Text.ElideRight
               }
 
@@ -712,6 +832,7 @@ Panel {
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
         }
+      }
       }
 
       Text {

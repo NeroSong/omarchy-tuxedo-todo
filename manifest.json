@@ -3,7 +3,7 @@
   "id": "omarchy-tuxedo",
   "name": "Omarchy Tuxedo",
   "version": "1.0.0",
-  "author": "Luciano Panebra",
+  "author": "Luciano Panepucci",
   "description": "A todo.txt task panel powered by Tuxedo",
   "kinds": [
     "bar-widget"
