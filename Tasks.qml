@@ -12,6 +12,7 @@ Panel {
 
   readonly property string todoPath: Quickshell.env("HOME") + "/Dropbox/brain-vaults/journaling/assets/todo.txt"
   readonly property string tuxedoPath: Quickshell.env("HOME") + "/Dropbox/github/lpanebr/dotfiles/bin/.local/bin/lgp-tuxedo"
+  readonly property string statePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/tasks.json"
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
@@ -26,6 +27,9 @@ Panel {
   property string searchText: ""
   property int dataRevision: 0
   property string statusMessage: ""
+  property bool badgeDueOnly: false
+  readonly property int dueCount: tasks.filter(function(task) { return task.isDue }).length
+  readonly property int badgeCount: badgeDueOnly ? dueCount : tasks.length
 
   readonly property var visibleTasks: {
     var revision = dataRevision
@@ -133,6 +137,20 @@ Panel {
     return "Todos"
   }
 
+  function loadState(raw) {
+    var state = null
+    try { state = JSON.parse(String(raw || "")) } catch (e) {}
+    badgeDueOnly = state && state.badgeDueOnly === true
+  }
+
+  function toggleBadgeMode() {
+    badgeDueOnly = !badgeDueOnly
+    stateFile.setText(JSON.stringify({
+      version: 1,
+      badgeDueOnly: badgeDueOnly
+    }, null, 2) + "\n")
+  }
+
   onOpenedChanged: {
     if (!opened) return
     todoFile.reload()
@@ -140,7 +158,21 @@ Panel {
     Qt.callLater(function() { searchField.forceActiveFocus() })
   }
 
-  Component.onCompleted: todoFile.reload()
+  Component.onCompleted: {
+    todoFile.reload()
+    stateFile.reload()
+  }
+
+  FileView {
+    id: stateFile
+    path: root.statePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.loadState(text())
+    onLoadFailed: root.loadState("")
+    onFileChanged: reload()
+  }
 
   FileView {
     id: todoFile
@@ -185,14 +217,14 @@ Panel {
 
     Text {
       anchors.centerIn: parent
-      text: "☑"
+      text: "󰄲"
       color: root.barForeground
       font.family: root.fontFamily
       font.pixelSize: Style.font.body + 2
     }
 
     Rectangle {
-      visible: root.tasks.length > 0
+      visible: root.badgeCount > 0
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.rightMargin: 1
@@ -200,12 +232,12 @@ Panel {
       width: Math.max(Style.space(14), countText.implicitWidth + Style.space(5))
       height: Style.space(14)
       radius: height / 2
-      color: root.tasks.some(function(task) { return task.isDue }) ? root.urgent : Color.accent
+      color: root.badgeDueOnly ? root.urgent : Color.accent
 
       Text {
         id: countText
         anchors.centerIn: parent
-        text: root.tasks.length > 99 ? "99+" : String(root.tasks.length)
+        text: root.badgeCount > 99 ? "99+" : String(root.badgeCount)
         color: Color.background
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption - 1
@@ -242,14 +274,15 @@ Panel {
         spacing: Style.space(10)
 
         Text {
-          text: "☑"
+          id: taskIcon
+          text: "󰄲"
           color: root.foreground
           font.family: root.fontFamily
           font.pixelSize: Style.font.heading + 3
         }
 
         Column {
-          width: parent.width - Style.space(48)
+          width: parent.width - taskIcon.width - badgeMode.implicitWidth - parent.spacing * 2
 
           Text {
             text: "Tarefas"
@@ -260,10 +293,33 @@ Panel {
           }
 
           Text {
-            text: root.tasks.length + " abertas · " + root.tasks.filter(function(task) { return task.isDue }).length + " vencendo"
+            text: root.tasks.length + " abertas · " + root.dueCount + " vencendo"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+          }
+        }
+
+        Row {
+          id: badgeMode
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(5)
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.badgeDueOnly ? "Vencidas" : "Todas"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          ToggleSwitch {
+            anchors.verticalCenter: parent.verticalCenter
+            checked: root.badgeDueOnly
+            trackHeight: Style.space(18)
+            foreground: root.foreground
+            accent: root.urgent
+            onToggled: root.toggleBadgeMode()
           }
         }
       }
