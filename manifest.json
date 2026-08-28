@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "lgp.tasks",
+  "name": "Tarefas",
+  "version": "1.0.0",
+  "author": "Luciano Panebra",
+  "description": "Painel do todo.txt com filtros por projeto e contexto",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Tasks.qml"
+  },
+  "barWidget": {
+    "displayName": "Tarefas",
+    "description": "Consulta e atualiza o todo.txt diretamente pela barra",
+    "category": "Produtividade",
+    "allowMultiple": false,
+    "defaultSection": "center"
+  }
+}
