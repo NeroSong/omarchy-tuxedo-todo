@@ -7,12 +7,11 @@ import qs.Ui
 
 Panel {
   id: root
-  moduleName: "lgp.tasks"
-  ipcTarget: "lgp.tasks"
+  moduleName: "omarchy-tuxedo"
+  ipcTarget: "omarchy-tuxedo"
 
-  readonly property string todoPath: Quickshell.env("HOME") + "/Dropbox/brain-vaults/journaling/assets/todo.txt"
-  readonly property string tuxedoPath: Quickshell.env("HOME") + "/Dropbox/github/lpanebr/dotfiles/bin/.local/bin/lgp-tuxedo"
-  readonly property string statePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/tasks.json"
+  readonly property string defaultTodoPath: Quickshell.env("HOME") + "/todo.txt"
+  readonly property string statePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/omarchy-tuxedo.json"
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
@@ -27,8 +26,10 @@ Panel {
   property string searchText: ""
   property int dataRevision: 0
   property string statusMessage: ""
+  property string todoPath: defaultTodoPath
   property bool badgeDueOnly: false
   property string sortMode: "sort:due"
+  property string panelMode: "tasks"
   property var selectedLines: ({})
   property int selectionRevision: 0
   property int editingLineNumber: 0
@@ -139,10 +140,19 @@ Panel {
     taskList.positionViewAtBeginning()
   }
 
+  function donePath() {
+    var slash = todoPath.lastIndexOf("/")
+    return (slash >= 0 ? todoPath.slice(0, slash + 1) : "") + "done.txt"
+  }
+
+  function tuxedoCommand(args) {
+    return ["env", "TODO_FILE=" + todoPath, "DONE_FILE=" + donePath(), "tuxedo"].concat(args)
+  }
+
   function completeTask(task) {
     if (!task || actionProcess.running) return
-    statusMessage = "Concluindo…"
-    actionProcess.command = [tuxedoPath, "do", String(task.lineNumber)]
+    statusMessage = "Completing…"
+    actionProcess.command = tuxedoCommand(["do", String(task.lineNumber)])
     actionProcess.running = true
   }
 
@@ -175,16 +185,16 @@ Panel {
   function completeSelected() {
     if (selectedCount === 0 || actionProcess.running) return
     var numbers = selectedTaskNumbers(false)
-    statusMessage = "Concluindo " + numbers.length + " tarefa(s)…"
-    actionProcess.command = [tuxedoPath, "do"].concat(numbers.map(String))
+    statusMessage = "Completing " + numbers.length + " task(s)…"
+    actionProcess.command = tuxedoCommand(["do"].concat(numbers.map(String)))
     actionProcess.running = true
   }
 
   function deleteSelected() {
     if (selectedCount === 0 || actionProcess.running) return
     var numbers = selectedTaskNumbers(true)
-    statusMessage = "Excluindo " + numbers.length + " tarefa(s)…"
-    actionProcess.command = [tuxedoPath, "del"].concat(numbers.map(String)).concat(["-f"])
+    statusMessage = "Deleting " + numbers.length + " task(s)…"
+    actionProcess.command = tuxedoCommand(["del"].concat(numbers.map(String)).concat(["-f"]))
     actionProcess.running = true
   }
 
@@ -205,29 +215,31 @@ Panel {
       editingLineNumber = 0
       return
     }
-    statusMessage = "Salvando…"
-    actionProcess.command = [tuxedoPath, "replace", String(task.lineNumber), value]
+    statusMessage = "Saving…"
+    actionProcess.command = tuxedoCommand(["replace", String(task.lineNumber), value])
     actionProcess.running = true
   }
 
   function addTask(text) {
     var value = String(text || "").trim()
     if (value === "" || actionProcess.running) return
-    statusMessage = "Adicionando…"
-    actionProcess.command = [tuxedoPath, "add", value]
+    statusMessage = "Adding…"
+    actionProcess.command = tuxedoCommand(["add", value])
     actionProcess.running = true
   }
 
   function filterLabel() {
     if (filterKind === "project") return "+" + filterValue
     if (filterKind === "context") return "@" + filterValue
-    if (filterKind === "due") return "Vencendo"
-    return "Todos"
+    if (filterKind === "due") return "Due"
+    return "All"
   }
 
   function loadState(raw) {
     var state = null
     try { state = JSON.parse(String(raw || "")) } catch (e) {}
+    var savedPath = state ? String(state.todoPath || "").trim() : ""
+    todoPath = savedPath.charAt(0) === "/" ? savedPath : defaultTodoPath
     badgeDueOnly = state && state.badgeDueOnly === true
     var savedSort = state ? String(state.sortMode || "") : ""
     sortMode = ["sort:due", "sort:file", "sort:priority"].indexOf(savedSort) >= 0
@@ -238,6 +250,7 @@ Panel {
   function saveState() {
     stateFile.setText(JSON.stringify({
       version: 1,
+      todoPath: todoPath,
       badgeDueOnly: badgeDueOnly,
       sortMode: sortMode
     }, null, 2) + "\n")
@@ -256,11 +269,39 @@ Panel {
     taskList.positionViewAtBeginning()
   }
 
+  function showSettings() {
+    panelMode = "settings"
+    settingsPathField.text = todoPath
+    Qt.callLater(function() {
+      settingsPathField.forceActiveFocus()
+      settingsPathField.selectAll()
+    })
+  }
+
+  function hideSettings() {
+    panelMode = "tasks"
+    Qt.callLater(function() { searchField.forceActiveFocus() })
+  }
+
+  function saveTodoPath(path) {
+    var value = String(path || "").trim()
+    if (value.charAt(0) !== "/") {
+      statusMessage = "Use an absolute path beginning with /"
+      return
+    }
+    todoPath = value
+    saveState()
+    statusMessage = ""
+    panelMode = "tasks"
+    todoFile.reload()
+  }
+
   onOpenedChanged: {
     if (!opened) {
       selectedLines = ({})
       selectionRevision++
       editingLineNumber = 0
+      panelMode = "tasks"
       return
     }
     todoFile.reload()
@@ -295,7 +336,7 @@ Panel {
       root.projects = []
       root.contexts = []
       root.dataRevision++
-      root.statusMessage = "Não foi possível ler o todo.txt"
+      root.statusMessage = "Could not read the configured todo.txt file"
     }
     onFileChanged: reload()
   }
@@ -312,7 +353,7 @@ Panel {
         root.statusMessage = ""
         addField.text = ""
       } else if (root.statusMessage === "") {
-        root.statusMessage = "A ação não pôde ser concluída"
+        root.statusMessage = "The action could not be completed"
       }
       todoFile.reload()
     }
@@ -360,7 +401,7 @@ Panel {
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
       onClicked: root.toggle()
-      onEntered: if (root.bar) root.bar.showTooltip(root, root.tasks.length + " tarefas abertas")
+      onEntered: if (root.bar) root.bar.showTooltip(root, root.tasks.length + " open tasks")
       onExited: if (root.bar) root.bar.hideTooltip(root)
     }
   }
@@ -371,7 +412,7 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: searchField
+    focusTarget: root.panelMode === "settings" ? settingsPathField : searchField
     contentWidth: panel.fittedContentWidth(Style.space(520))
     contentHeight: panel.fittedContentHeight(Style.space(610), Style.space(680))
 
@@ -392,10 +433,10 @@ Panel {
         }
 
         Column {
-          width: parent.width - taskIcon.width - badgeMode.implicitWidth - parent.spacing * 2
+          width: parent.width - taskIcon.width - badgeMode.implicitWidth - settingsButton.width - parent.spacing * 3
 
           Text {
-            text: "Tarefas"
+            text: "Tasks"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
@@ -403,7 +444,7 @@ Panel {
           }
 
           Text {
-            text: root.tasks.length + " abertas · " + root.dueCount + " vencendo · " + root.sortMode
+            text: root.tasks.length + " open · " + root.dueCount + " due · " + root.sortMode
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -417,7 +458,7 @@ Panel {
 
           Text {
             anchors.verticalCenter: parent.verticalCenter
-            text: root.badgeDueOnly ? "Vencidas" : "Todas"
+            text: root.badgeDueOnly ? "Due" : "All"
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -432,12 +473,25 @@ Panel {
             onToggled: root.toggleBadgeMode()
           }
         }
+
+        PanelActionButton {
+          id: settingsButton
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "󰒓"
+          tooltipText: root.panelMode === "settings" ? "Back to tasks" : "Settings"
+          foreground: root.dim
+          hoverColor: root.foreground
+          fontFamily: root.fontFamily
+          fontSize: Style.font.heading
+          onClicked: root.panelMode === "settings" ? root.hideSettings() : root.showSettings()
+        }
       }
 
       TextField {
         id: searchField
+        visible: root.panelMode === "tasks"
         width: parent.width
-        placeholderText: "Buscar tarefas"
+        placeholderText: "Search tasks"
         foreground: root.foreground
         accent: Color.accent
         font.family: root.fontFamily
@@ -446,6 +500,7 @@ Panel {
       }
 
       Flickable {
+        visible: root.panelMode === "tasks"
         width: parent.width
         height: Style.space(34)
         contentWidth: filterRow.implicitWidth
@@ -457,9 +512,9 @@ Panel {
           id: filterRow
           spacing: Style.space(6)
 
-          FilterChip { label: "Ordem"; selected: false; onActivated: root.cycleSortMode() }
-          FilterChip { label: "Todos"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
-          FilterChip { label: "Vencendo"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
+          FilterChip { label: "Order"; selected: false; onActivated: root.cycleSortMode() }
+          FilterChip { label: "All"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
+          FilterChip { label: "Due"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
 
           Repeater {
             model: root.projects
@@ -483,10 +538,11 @@ Panel {
         }
       }
 
-      Rectangle { width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
+      Rectangle { visible: root.panelMode === "tasks"; width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
 
       ListView {
         id: taskList
+        visible: root.panelMode === "tasks"
         width: parent.width
         height: parent.height - Style.space(root.selectedCount > 0 ? 251 : 205)
         model: root.visibleTasks
@@ -584,7 +640,7 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(80)
               horizontalAlignment: Text.AlignRight
-              text: modelData.overdue ? "atrasada" : modelData.due
+              text: modelData.overdue ? "overdue" : modelData.due
               color: modelData.isDue ? root.urgent : root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -594,7 +650,7 @@ Panel {
               id: editButton
               anchors.verticalCenter: parent.verticalCenter
               iconText: "✎"
-              tooltipText: "Editar tarefa"
+              tooltipText: "Edit task"
               foreground: root.dim
               hoverColor: root.foreground
               fontFamily: root.fontFamily
@@ -630,7 +686,7 @@ Panel {
               id: saveEditButton
               anchors.verticalCenter: parent.verticalCenter
               iconText: "✓"
-              tooltipText: "Salvar"
+              tooltipText: "Save"
               foreground: root.foreground
               hoverColor: Color.accent
               onClicked: root.saveEditing(taskRow.modelData, editField.text)
@@ -640,7 +696,7 @@ Panel {
               id: cancelEditButton
               anchors.verticalCenter: parent.verticalCenter
               iconText: "×"
-              tooltipText: "Cancelar"
+              tooltipText: "Cancel"
               foreground: root.dim
               hoverColor: root.urgent
               onClicked: root.cancelEditing()
@@ -651,7 +707,7 @@ Panel {
         Text {
           anchors.centerIn: parent
           visible: root.visibleTasks.length === 0
-          text: "Nenhuma tarefa em " + root.filterLabel()
+          text: "No tasks in " + root.filterLabel()
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -659,8 +715,8 @@ Panel {
       }
 
       Text {
+        visible: root.panelMode === "tasks" && root.statusMessage !== ""
         width: parent.width
-        visible: root.statusMessage !== ""
         text: root.statusMessage
         color: root.urgent
         font.family: root.fontFamily
@@ -670,8 +726,9 @@ Panel {
 
       TextField {
         id: addField
+        visible: root.panelMode === "tasks"
         width: parent.width
-        placeholderText: "Adicionar tarefa — ex.: pagar aluguel sexta"
+        placeholderText: "Add a task — try: pay rent Friday"
         foreground: root.foreground
         accent: Color.accent
         font.family: root.fontFamily
@@ -680,13 +737,13 @@ Panel {
       }
 
       Row {
-        visible: root.selectedCount > 0
+        visible: root.panelMode === "tasks" && root.selectedCount > 0
         width: parent.width
         spacing: Style.space(8)
 
         Button {
           width: (parent.width - parent.spacing) / 2
-          text: "Concluir (" + root.selectedCount + ")"
+          text: "Complete (" + root.selectedCount + ")"
           iconText: "✓"
           bordered: true
           foreground: root.foreground
@@ -697,13 +754,85 @@ Panel {
 
         Button {
           width: (parent.width - parent.spacing) / 2
-          text: "Excluir (" + root.selectedCount + ")"
+          text: "Delete (" + root.selectedCount + ")"
           iconText: "󰆴"
           bordered: true
           foreground: root.urgent
           accent: root.urgent
           fontFamily: root.fontFamily
           onClicked: root.deleteSelected()
+        }
+      }
+
+      Column {
+        visible: root.panelMode === "settings"
+        width: parent.width
+        spacing: Style.space(12)
+
+        Text {
+          width: parent.width
+          text: "Todo file"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+          font.bold: true
+        }
+
+        Text {
+          width: parent.width
+          text: "Choose the absolute path to your todo.txt file. The archive will use done.txt in the same folder."
+          color: root.dim
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        TextField {
+          id: settingsPathField
+          width: parent.width
+          placeholderText: root.defaultTodoPath
+          foreground: root.foreground
+          accent: Color.accent
+          font.family: root.fontFamily
+          onAccepted: root.saveTodoPath(text)
+          Keys.onEscapePressed: root.hideSettings()
+        }
+
+        Text {
+          visible: root.statusMessage !== ""
+          width: parent.width
+          text: root.statusMessage
+          color: root.urgent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          wrapMode: Text.WordWrap
+        }
+
+        Row {
+          width: parent.width
+          spacing: Style.space(8)
+
+          Button {
+            width: (parent.width - parent.spacing) / 2
+            text: "Save"
+            iconText: "✓"
+            bordered: true
+            foreground: root.foreground
+            accent: Color.accent
+            fontFamily: root.fontFamily
+            onClicked: root.saveTodoPath(settingsPathField.text)
+          }
+
+          Button {
+            width: (parent.width - parent.spacing) / 2
+            text: "Cancel"
+            iconText: "×"
+            bordered: true
+            foreground: root.dim
+            accent: root.foreground
+            fontFamily: root.fontFamily
+            onClicked: root.hideSettings()
+          }
         }
       }
     }

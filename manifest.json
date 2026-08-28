@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "lgp.tasks",
-  "name": "Tarefas",
+  "id": "omarchy-tuxedo",
+  "name": "Omarchy Tuxedo",
   "version": "1.0.0",
   "author": "Luciano Panebra",
-  "description": "Painel do todo.txt com filtros por projeto e contexto",
+  "description": "A todo.txt task panel powered by Tuxedo",
   "kinds": [
     "bar-widget"
   ],
@@ -12,9 +12,9 @@
     "barWidget": "Tasks.qml"
   },
   "barWidget": {
-    "displayName": "Tarefas",
-    "description": "Consulta e atualiza o todo.txt diretamente pela barra",
-    "category": "Produtividade",
+    "displayName": "Omarchy Tuxedo",
+    "description": "Browse and update todo.txt tasks directly from the bar",
+    "category": "Productivity",
     "allowMultiple": false,
     "defaultSection": "center"
   }
