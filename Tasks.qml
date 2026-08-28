@@ -513,19 +513,22 @@ Panel {
         visible: root.panelMode === "tasks"
         width: parent.width
         height: Style.space(34)
-        spacing: Style.space(6)
+        spacing: Style.space(14)
 
-        FilterChip {
+        TextAction {
+          id: filterAction
+          iconText: "󰈲"
           label: "Filter"
           selected: root.filterSidebarOpen || root.filterKind === "project" || root.filterKind === "context"
           onActivated: root.filterSidebarOpen = !root.filterSidebarOpen
         }
-        FilterChip { label: "Order"; selected: false; onActivated: root.cycleSortMode() }
-        FilterChip { label: "All"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
-        FilterChip { label: "Due"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
+        TextAction { id: sortAction; iconText: "󰒺"; label: "Sort"; onActivated: root.cycleSortMode() }
+        TextAction { id: allAction; iconText: "󰄬"; label: "All"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
+        TextAction { id: dueAction; iconText: "󰃰"; label: "Due"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
 
         Item {
-          width: Math.max(0, parent.width - lineMode.implicitWidth - Style.space(230))
+          width: Math.max(0, parent.width - filterAction.width - sortAction.width - allAction.width
+            - dueAction.width - lineMode.implicitWidth - parent.spacing * 5)
           height: 1
         }
 
@@ -567,13 +570,13 @@ Panel {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: Style.space(180)
+          width: Style.space(138)
           radius: Style.cornerRadius
           color: Style.normalFillFor(root.foreground, Color.accent)
 
           Column {
             anchors.fill: parent
-            anchors.margins: Style.space(10)
+          anchors.margins: Style.space(8)
             spacing: Style.space(8)
 
             Row {
@@ -615,7 +618,7 @@ Panel {
                 Text {
                   width: parent.width
                   text: "Projects"
-                  color: root.dim
+                  color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true
@@ -623,10 +626,11 @@ Panel {
 
                 Repeater {
                   model: root.projects
-                  FilterChip {
+                  TextAction {
                     required property string modelData
                     width: sidebarColumn.width
                     label: "+" + modelData
+                    leftAlign: true
                     selected: root.filterKind === "project" && root.filterValue === modelData
                     onActivated: root.selectFilter("project", modelData)
                   }
@@ -636,7 +640,7 @@ Panel {
                   width: parent.width
                   topPadding: Style.space(8)
                   text: "Contexts"
-                  color: root.dim
+                  color: root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true
@@ -644,10 +648,11 @@ Panel {
 
                 Repeater {
                   model: root.contexts
-                  FilterChip {
+                  TextAction {
                     required property string modelData
                     width: sidebarColumn.width
                     label: "@" + modelData
+                    leftAlign: true
                     selected: root.filterKind === "context" && root.filterValue === modelData
                     onActivated: root.selectFilter("context", modelData)
                   }
@@ -959,34 +964,56 @@ Panel {
     }
   }
 
-  component FilterChip: Rectangle {
-    id: chip
+  component TextAction: Item {
+    id: action
     required property string label
+    property string iconText: ""
     property bool selected: false
+    property bool leftAlign: false
     signal activated()
-    width: chipText.implicitWidth + Style.space(16)
-    height: Style.space(30)
-    radius: height / 2
-    color: selected ? Color.accent : (chipMouse.containsMouse ? Style.selectedFillFor(root.foreground, Color.accent) : "transparent")
-    border.width: selected ? 0 : 1
-    border.color: root.dim
+    implicitWidth: actionRow.implicitWidth
+    implicitHeight: Style.space(24)
+    width: implicitWidth
+    height: implicitHeight
 
-    Text {
-      id: chipText
-      anchors.centerIn: parent
-      text: chip.label
-      color: chip.selected ? Color.background : root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-      font.bold: chip.selected
+    Row {
+      id: actionRow
+      anchors.left: action.leftAlign ? parent.left : undefined
+      anchors.horizontalCenter: action.leftAlign ? undefined : parent.horizontalCenter
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.space(4)
+
+      Text {
+        id: actionIcon
+        visible: action.iconText !== ""
+        anchors.verticalCenter: parent.verticalCenter
+        text: action.iconText
+        color: action.selected || actionMouse.containsMouse ? Color.accent : root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.body
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        width: action.leftAlign
+          ? Math.max(0, action.width - (actionIcon.visible ? actionIcon.width + actionRow.spacing : 0))
+          : implicitWidth
+        text: action.label
+        color: action.selected ? Color.accent : (actionMouse.containsMouse ? root.foreground : root.dim)
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.bold: action.selected
+        font.underline: actionMouse.containsMouse
+        elide: Text.ElideRight
+      }
     }
 
     MouseArea {
-      id: chipMouse
+      id: actionMouse
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onClicked: chip.activated()
+      onClicked: action.activated()
     }
   }
 }
