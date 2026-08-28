@@ -28,8 +28,15 @@ Panel {
   property int dataRevision: 0
   property string statusMessage: ""
   property bool badgeDueOnly: false
+  property var selectedLines: ({})
+  property int selectionRevision: 0
+  property int editingLineNumber: 0
   readonly property int dueCount: tasks.filter(function(task) { return task.isDue }).length
   readonly property int badgeCount: badgeDueOnly ? dueCount : tasks.length
+  readonly property int selectedCount: {
+    var revision = selectionRevision
+    return Object.keys(selectedLines).length
+  }
 
   readonly property var visibleTasks: {
     var revision = dataRevision
@@ -97,6 +104,9 @@ Panel {
     tasks = nextTasks
     projects = Object.keys(projectSet).sort(function(a, b) { return a.localeCompare(b) })
     contexts = Object.keys(contextSet).sort(function(a, b) { return a.localeCompare(b) })
+    selectedLines = ({})
+    selectionRevision++
+    editingLineNumber = 0
     dataRevision++
   }
 
@@ -119,6 +129,70 @@ Panel {
     if (!task || actionProcess.running) return
     statusMessage = "Concluindo…"
     actionProcess.command = [tuxedoPath, "do", String(task.lineNumber)]
+    actionProcess.running = true
+  }
+
+  function isSelected(task) {
+    var revision = selectionRevision
+    return !!task && selectedLines[String(task.lineNumber)] === task.text
+  }
+
+  function toggleSelected(task) {
+    if (!task || editingLineNumber !== 0) return
+    var next = {}
+    for (var key in selectedLines) next[key] = selectedLines[key]
+    var lineKey = String(task.lineNumber)
+    if (next[lineKey] === task.text) delete next[lineKey]
+    else next[lineKey] = task.text
+    selectedLines = next
+    selectionRevision++
+  }
+
+  function selectedTaskNumbers(descending) {
+    var numbers = []
+    for (var key in selectedLines) {
+      var lineNumber = Number(key)
+      if (isFinite(lineNumber) && selectedLines[key] !== undefined) numbers.push(lineNumber)
+    }
+    numbers.sort(function(a, b) { return descending ? b - a : a - b })
+    return numbers
+  }
+
+  function completeSelected() {
+    if (selectedCount === 0 || actionProcess.running) return
+    var numbers = selectedTaskNumbers(false)
+    statusMessage = "Concluindo " + numbers.length + " tarefa(s)…"
+    actionProcess.command = [tuxedoPath, "do"].concat(numbers.map(String))
+    actionProcess.running = true
+  }
+
+  function deleteSelected() {
+    if (selectedCount === 0 || actionProcess.running) return
+    var numbers = selectedTaskNumbers(true)
+    statusMessage = "Excluindo " + numbers.length + " tarefa(s)…"
+    actionProcess.command = [tuxedoPath, "del"].concat(numbers.map(String)).concat(["-f"])
+    actionProcess.running = true
+  }
+
+  function startEditing(task) {
+    if (!task || actionProcess.running) return
+    selectedLines = ({})
+    selectionRevision++
+    editingLineNumber = task.lineNumber
+  }
+
+  function cancelEditing() {
+    editingLineNumber = 0
+  }
+
+  function saveEditing(task, text) {
+    var value = String(text || "").trim()
+    if (!task || value === "" || value === task.text || actionProcess.running) {
+      editingLineNumber = 0
+      return
+    }
+    statusMessage = "Salvando…"
+    actionProcess.command = [tuxedoPath, "replace", String(task.lineNumber), value]
     actionProcess.running = true
   }
 
@@ -152,7 +226,12 @@ Panel {
   }
 
   onOpenedChanged: {
-    if (!opened) return
+    if (!opened) {
+      selectedLines = ({})
+      selectionRevision++
+      editingLineNumber = 0
+      return
+    }
     todoFile.reload()
     statusMessage = ""
     Qt.callLater(function() { searchField.forceActiveFocus() })
@@ -377,26 +456,42 @@ Panel {
       ListView {
         id: taskList
         width: parent.width
-        height: parent.height - Style.space(205)
+        height: parent.height - Style.space(root.selectedCount > 0 ? 251 : 205)
         model: root.visibleTasks
         clip: true
         spacing: Style.space(2)
         boundsBehavior: Flickable.StopAtBounds
 
         delegate: Rectangle {
+          id: taskRow
           required property var modelData
+          readonly property bool selected: root.isSelected(modelData)
+          readonly property bool editing: root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
-          height: Style.space(48)
+          height: Style.space(editing ? 52 : 48)
           radius: Style.cornerRadius
-          color: taskMouse.containsMouse ? Style.selectedFillFor(root.foreground, Color.accent) : "transparent"
+          color: selected
+            ? Style.selectedFillFor(root.foreground, Color.accent)
+            : (taskMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent")
+
+          MouseArea {
+            id: taskMouse
+            anchors.fill: parent
+            enabled: !taskRow.editing
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.toggleSelected(taskRow.modelData)
+          }
 
           Row {
+            visible: !taskRow.editing
             anchors.fill: parent
             anchors.leftMargin: Style.space(5)
             anchors.rightMargin: Style.space(5)
             spacing: Style.space(9)
 
             Rectangle {
+              id: completeBox
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(16)
               height: width
@@ -409,14 +504,23 @@ Panel {
                 anchors.centerIn: parent
                 text: "✓"
                 color: root.foreground
-                opacity: taskMouse.containsMouse ? 1 : 0
+                opacity: completeMouse.containsMouse ? 1 : 0
                 font.pixelSize: Style.font.caption
+              }
+
+              MouseArea {
+                id: completeMouse
+                anchors.fill: parent
+                anchors.margins: -Style.space(6)
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.completeTask(taskRow.modelData)
               }
             }
 
             Column {
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - Style.space(116)
+              width: parent.width - completeBox.width - dueText.width - editButton.width - parent.spacing * 3
               spacing: 2
 
               Text {
@@ -441,6 +545,7 @@ Panel {
             }
 
             Text {
+              id: dueText
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(80)
               horizontalAlignment: Text.AlignRight
@@ -449,14 +554,62 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
             }
+
+            PanelActionButton {
+              id: editButton
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "✎"
+              tooltipText: "Editar tarefa"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.body + 2
+              onClicked: root.startEditing(taskRow.modelData)
+            }
           }
 
-          MouseArea {
-            id: taskMouse
+          Row {
+            visible: taskRow.editing
             anchors.fill: parent
-            hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
-            onClicked: root.completeTask(modelData)
+            anchors.leftMargin: Style.space(4)
+            anchors.rightMargin: Style.space(4)
+            spacing: Style.space(5)
+
+            TextField {
+              id: editField
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - saveEditButton.width - cancelEditButton.width - parent.spacing * 2
+              text: taskRow.editing ? taskRow.modelData.text : ""
+              foreground: root.foreground
+              accent: Color.accent
+              font.family: root.fontFamily
+              onAccepted: root.saveEditing(taskRow.modelData, text)
+              onVisibleChanged: if (visible) Qt.callLater(function() {
+                editField.forceActiveFocus()
+                editField.selectAll()
+              })
+              Keys.onEscapePressed: root.cancelEditing()
+            }
+
+            PanelActionButton {
+              id: saveEditButton
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "✓"
+              tooltipText: "Salvar"
+              foreground: root.foreground
+              hoverColor: Color.accent
+              onClicked: root.saveEditing(taskRow.modelData, editField.text)
+            }
+
+            PanelActionButton {
+              id: cancelEditButton
+              anchors.verticalCenter: parent.verticalCenter
+              iconText: "×"
+              tooltipText: "Cancelar"
+              foreground: root.dim
+              hoverColor: root.urgent
+              onClicked: root.cancelEditing()
+            }
           }
         }
 
@@ -489,6 +642,34 @@ Panel {
         font.family: root.fontFamily
         onAccepted: root.addTask(text)
         Keys.onEscapePressed: root.close()
+      }
+
+      Row {
+        visible: root.selectedCount > 0
+        width: parent.width
+        spacing: Style.space(8)
+
+        Button {
+          width: (parent.width - parent.spacing) / 2
+          text: "Concluir (" + root.selectedCount + ")"
+          iconText: "✓"
+          bordered: true
+          foreground: root.foreground
+          accent: Color.accent
+          fontFamily: root.fontFamily
+          onClicked: root.completeSelected()
+        }
+
+        Button {
+          width: (parent.width - parent.spacing) / 2
+          text: "Excluir (" + root.selectedCount + ")"
+          iconText: "󰆴"
+          bordered: true
+          foreground: root.urgent
+          accent: root.urgent
+          fontFamily: root.fontFamily
+          onClicked: root.deleteSelected()
+        }
       }
     }
   }
