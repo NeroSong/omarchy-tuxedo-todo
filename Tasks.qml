@@ -28,6 +28,7 @@ Panel {
   property int dataRevision: 0
   property string statusMessage: ""
   property bool badgeDueOnly: false
+  property string sortMode: "sort:due"
   property var selectedLines: ({})
   property int selectionRevision: 0
   property int editingLineNumber: 0
@@ -50,6 +51,19 @@ Panel {
       if (needle !== "" && task.text.toLowerCase().indexOf(needle) < 0) continue
       result.push(task)
     }
+    result.sort(function(a, b) {
+      if (sortMode === "sort:file") return a.lineNumber - b.lineNumber
+      if (sortMode === "sort:priority") {
+        var aPriority = a.priority === "" ? 999 : a.priority.charCodeAt(0) - 65
+        var bPriority = b.priority === "" ? 999 : b.priority.charCodeAt(0) - 65
+        var priorityOrder = aPriority - bPriority
+        return priorityOrder !== 0 ? priorityOrder : a.lineNumber - b.lineNumber
+      }
+      if (a.due === "" && b.due !== "") return 1
+      if (a.due !== "" && b.due === "") return -1
+      var dueOrder = a.due.localeCompare(b.due)
+      return dueOrder !== 0 ? dueOrder : a.lineNumber - b.lineNumber
+    })
     return result
   }
 
@@ -215,14 +229,31 @@ Panel {
     var state = null
     try { state = JSON.parse(String(raw || "")) } catch (e) {}
     badgeDueOnly = state && state.badgeDueOnly === true
+    var savedSort = state ? String(state.sortMode || "") : ""
+    sortMode = ["sort:due", "sort:file", "sort:priority"].indexOf(savedSort) >= 0
+      ? savedSort
+      : "sort:due"
+  }
+
+  function saveState() {
+    stateFile.setText(JSON.stringify({
+      version: 1,
+      badgeDueOnly: badgeDueOnly,
+      sortMode: sortMode
+    }, null, 2) + "\n")
   }
 
   function toggleBadgeMode() {
     badgeDueOnly = !badgeDueOnly
-    stateFile.setText(JSON.stringify({
-      version: 1,
-      badgeDueOnly: badgeDueOnly
-    }, null, 2) + "\n")
+    saveState()
+  }
+
+  function cycleSortMode() {
+    var modes = ["sort:due", "sort:file", "sort:priority"]
+    var current = modes.indexOf(sortMode)
+    sortMode = modes[(current + 1) % modes.length]
+    saveState()
+    taskList.positionViewAtBeginning()
   }
 
   onOpenedChanged: {
@@ -372,7 +403,7 @@ Panel {
           }
 
           Text {
-            text: root.tasks.length + " abertas · " + root.dueCount + " vencendo"
+            text: root.tasks.length + " abertas · " + root.dueCount + " vencendo · " + root.sortMode
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -426,6 +457,7 @@ Panel {
           id: filterRow
           spacing: Style.space(6)
 
+          FilterChip { label: "Ordem"; selected: false; onActivated: root.cycleSortMode() }
           FilterChip { label: "Todos"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
           FilterChip { label: "Vencendo"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
 
@@ -535,8 +567,11 @@ Panel {
 
               Text {
                 width: parent.width
-                visible: modelData.projects.length > 0 || modelData.contexts.length > 0
-                text: modelData.projects.map(function(v) { return "+" + v }).concat(modelData.contexts.map(function(v) { return "@" + v })).join("  ")
+                visible: modelData.priority !== "" || modelData.projects.length > 0 || modelData.contexts.length > 0
+                text: (modelData.priority !== "" ? ["(" + modelData.priority + ")"] : [])
+                  .concat(modelData.projects.map(function(v) { return "+" + v }))
+                  .concat(modelData.contexts.map(function(v) { return "@" + v }))
+                  .join("  ")
                 color: Color.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
