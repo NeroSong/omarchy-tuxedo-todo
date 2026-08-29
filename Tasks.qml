@@ -11,7 +11,14 @@ Panel {
   ipcTarget: "omarchy-tuxedo"
 
   readonly property string defaultTodoPath: Quickshell.env("HOME") + "/todo.txt"
-  readonly property string statePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/omarchy/omarchy-tuxedo.json"
+  readonly property string statePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state")
+    + "/omarchy/omarchy-tuxedo/state.json"
+  readonly property string helperPath: {
+    var url = String(Qt.resolvedUrl("secure_files.py"))
+    return url.indexOf("file://") === 0 ? decodeURIComponent(url.slice(7)) : ""
+  }
+  readonly property int todoOutputLimit: 8 * 1024 * 1024 * 6 + 256
+  readonly property int stateOutputLimit: 1024 * 1024 * 6 + 256
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color barForeground: bar ? bar.barForeground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.55)
@@ -38,6 +45,15 @@ Panel {
   property int activeTaskIndex: 0
   property int sidebarCursor: 0
   property string keyPrefix: ""
+  property bool ioReady: false
+  property bool todoReadPending: false
+  property bool stateReadPending: false
+  property bool stateWritePending: false
+  property bool todoWatcherWanted: false
+  property bool stateWatcherWanted: false
+  property bool todoWatcherRestartImmediate: false
+  property string todoReadPath: ""
+  property string stateWritePayload: ""
   readonly property int dueCount: tasks.filter(function(task) { return task.isDue }).length
   readonly property int badgeCount: badgeDueOnly ? dueCount : tasks.length
   readonly property int selectedCount: {
@@ -388,14 +404,105 @@ Panel {
       : "sort:due"
   }
 
+  function friendlyFileError(code, kind) {
+    var names = {
+      "NOT_FOUND": kind === "todo" ? "The configured todo.txt file does not exist" : "State file not found",
+      "SYMLINK": "Refusing to use a symbolic link for " + kind,
+      "NOT_REGULAR": "The " + kind + " path is not a regular file",
+      "WRONG_OWNER": "The " + kind + " file is not owned by the current user",
+      "TOO_LARGE": "The " + kind + " file exceeds its safety limit",
+      "LINE_TOO_LONG": "A todo.txt line exceeds 64 KiB",
+      "INVALID_UTF8": "The " + kind + " file is not valid UTF-8",
+      "STATE_FILE_MODE": "The state file permissions are too broad",
+      "STATE_DIR_WRONG_OWNER": "The private state directory has the wrong owner",
+      "STATE_DIR_MODE": "Could not secure the private state directory",
+      "WATCH_PARENT": "Could not watch the " + kind + " directory",
+      "ACCESS": "Permission denied while reading " + kind,
+      "CHANGED": "The " + kind + " file changed while it was being read"
+    }
+    return names[code] || "Could not securely access " + kind
+  }
+
+  function parseHelperReply(raw, limit, kind) {
+    var value = String(raw || "")
+    if (value.length > limit) {
+      statusMessage = "The " + kind + " helper response exceeded its safety limit"
+      return null
+    }
+    var reply = null
+    try { reply = JSON.parse(value) } catch (e) {}
+    if (!reply || reply.ok !== true) {
+      statusMessage = friendlyFileError(reply ? String(reply.error || "") : "", kind)
+      return null
+    }
+    return reply
+  }
+
+  function requestTodoRead() {
+    if (!ioReady || helperPath === "") return
+    if (todoReadProcess.running) {
+      todoReadPending = true
+      return
+    }
+    todoReadPending = false
+    todoReadPath = todoPath
+    todoReadProcess.command = ["python3", helperPath, "read-todo", todoReadPath]
+    todoReadProcess.running = true
+  }
+
+  function requestStateRead() {
+    if (helperPath === "") {
+      statusMessage = "Could not resolve the bundled file helper"
+      return
+    }
+    if (stateReadProcess.running) {
+      stateReadPending = true
+      return
+    }
+    stateReadPending = false
+    stateReadProcess.command = ["python3", helperPath, "read-state", statePath]
+    stateReadProcess.running = true
+  }
+
   function saveState() {
-    stateFile.setText(JSON.stringify({
+    var payload = JSON.stringify({
       version: 1,
       todoPath: todoPath,
       badgeDueOnly: badgeDueOnly,
       twoLineDescriptions: twoLineDescriptions,
       sortMode: sortMode
-    }, null, 2) + "\n")
+    })
+    if (payload.length > 1024 * 1024) {
+      statusMessage = "State exceeds its 1 MiB safety limit"
+      return
+    }
+    stateWritePayload = payload
+    if (stateWriteProcess.running) {
+      stateWritePending = true
+      return
+    }
+    stateWritePending = false
+    stateWriteProcess.command = ["python3", helperPath, "write-state", statePath]
+    stateWriteProcess.running = true
+  }
+
+  function restartTodoWatcher() {
+    if (!ioReady || helperPath === "") return
+    todoWatcherWanted = true
+    todoWatchRestart.stop()
+    if (todoWatchProcess.running) {
+      todoWatcherRestartImmediate = true
+      todoWatchProcess.signal(15)
+    } else {
+      todoWatchProcess.command = ["python3", helperPath, "watch", todoPath]
+      todoWatchProcess.running = true
+    }
+  }
+
+  function startStateWatcher() {
+    if (!ioReady || helperPath === "") return
+    stateWatcherWanted = true
+    if (!stateWatchProcess.running) stateWatchRestart.start()
   }
 
   function toggleBadgeMode() {
@@ -441,7 +548,8 @@ Panel {
     saveState()
     statusMessage = ""
     panelMode = "tasks"
-    todoFile.reload()
+    restartTodoWatcher()
+    requestTodoRead()
   }
 
   onOpenedChanged: {
@@ -454,7 +562,7 @@ Panel {
       clearPrefix()
       return
     }
-    todoFile.reload()
+    requestTodoRead()
     statusMessage = ""
     Qt.callLater(function() { searchField.forceActiveFocus() })
   }
@@ -470,35 +578,129 @@ Panel {
   }
 
   Component.onCompleted: {
-    todoFile.reload()
-    stateFile.reload()
+    requestStateRead()
   }
 
-  FileView {
-    id: stateFile
-    path: root.statePath
-    watchChanges: true
-    atomicWrites: true
-    printErrors: false
-    onLoaded: root.loadState(text())
-    onLoadFailed: root.loadState("")
-    onFileChanged: reload()
-  }
-
-  FileView {
-    id: todoFile
-    path: root.todoPath
-    watchChanges: true
-    printErrors: false
-    onLoaded: root.parseTodo(text())
-    onLoadFailed: {
-      root.tasks = []
-      root.projects = []
-      root.contexts = []
-      root.dataRevision++
-      root.statusMessage = "Could not read the configured todo.txt file"
+  Process {
+    id: todoReadProcess
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var reply = root.parseHelperReply(text, root.todoOutputLimit, "todo")
+        if (reply && root.todoReadPath === root.todoPath) {
+          root.parseTodo(String(reply.data || ""))
+          root.statusMessage = ""
+        } else if (!reply && root.todoReadPath === root.todoPath) {
+          root.tasks = []
+          root.projects = []
+          root.contexts = []
+          root.selectedLines = ({})
+          root.selectionRevision++
+          root.dataRevision++
+        }
+      }
     }
-    onFileChanged: reload()
+    onExited: {
+      if (root.todoReadPending || root.todoReadPath !== root.todoPath) root.requestTodoRead()
+    }
+  }
+
+  Process {
+    id: stateReadProcess
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var reply = root.parseHelperReply(text, root.stateOutputLimit, "state")
+        var previousTodoPath = root.todoPath
+        root.loadState(reply ? String(reply.data || "") : "")
+        if (!root.ioReady) {
+          root.ioReady = true
+          root.restartTodoWatcher()
+          root.startStateWatcher()
+          root.requestTodoRead()
+        } else if (root.todoPath !== previousTodoPath) {
+          root.restartTodoWatcher()
+          root.requestTodoRead()
+        }
+      }
+    }
+    onExited: if (root.stateReadPending) root.requestStateRead()
+  }
+
+  Process {
+    id: stateWriteProcess
+    running: false
+    stdinEnabled: true
+    onStarted: write(root.stateWritePayload + "\n")
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: root.parseHelperReply(text, 512, "state")
+    }
+    onExited: if (root.stateWritePending) root.saveState()
+  }
+
+  Process {
+    id: todoWatchProcess
+    running: false
+    stdout: SplitParser {
+      onRead: function(line) {
+        var value = String(line || "").trim()
+        if (value === "EVENT") todoReadDebounce.restart()
+        else if (value === "READY") {}
+        else if (value !== "") {
+          var reply = root.parseHelperReply(value, 512, "todo")
+        }
+      }
+    }
+    onExited: {
+      if (!root.todoWatcherWanted) return
+      if (root.todoWatcherRestartImmediate) {
+        root.todoWatcherRestartImmediate = false
+        todoWatchProcess.command = ["python3", root.helperPath, "watch", root.todoPath]
+        todoWatchProcess.running = true
+      } else {
+        todoWatchRestart.start()
+      }
+    }
+  }
+
+  Process {
+    id: stateWatchProcess
+    running: false
+    stdout: SplitParser {
+      onRead: function(line) {
+        var value = String(line || "").trim()
+        if (value === "EVENT") stateReadDebounce.restart()
+        else if (value === "READY") {}
+        else if (value !== "") {
+          var reply = root.parseHelperReply(value, 512, "state")
+        }
+      }
+    }
+    onExited: if (root.stateWatcherWanted) stateWatchRestart.start()
+  }
+
+  Timer { id: todoReadDebounce; interval: 80; repeat: false; onTriggered: root.requestTodoRead() }
+  Timer { id: stateReadDebounce; interval: 80; repeat: false; onTriggered: root.requestStateRead() }
+  Timer {
+    id: todoWatchRestart
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      todoWatchProcess.command = ["python3", root.helperPath, "watch", root.todoPath]
+      todoWatchProcess.running = true
+    }
+  }
+  Timer {
+    id: stateWatchRestart
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      stateWatchProcess.command = ["python3", root.helperPath, "watch", root.statePath]
+      stateWatchProcess.running = true
+    }
   }
 
   Process {
@@ -515,7 +717,7 @@ Panel {
       } else if (root.statusMessage === "") {
         root.statusMessage = "The action could not be completed"
       }
-      todoFile.reload()
+      root.requestTodoRead()
     }
   }
 

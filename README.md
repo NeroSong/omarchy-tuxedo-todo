@@ -21,6 +21,7 @@ A focused todo.txt task panel for Omarchy Quattro, powered by the [Tuxedo](https
 ## Requirements
 
 - Omarchy Quattro
+- Python 3 (the bundled helper uses only the standard library)
 - The external [`tuxedo` CLI](https://github.com/webstonehq/tuxedo/releases/latest) installed and available on your `PATH`
 
 Download and install the appropriate Tuxedo release for your system before using the widget.
@@ -86,17 +87,21 @@ By default, the plugin reads:
 ~/todo.txt
 ```
 
-To use another file, open the panel settings and enter its absolute path. Relative paths are rejected. The chosen path, badge mode, description layout, and sort mode are saved to:
+To use another file, open the panel settings and enter its absolute path. Relative paths are rejected. Ordinary files in Dropbox work normally. If the configured path is a symbolic link, enter the real target path instead.
+
+The chosen path, badge mode, description layout, and sort mode are saved to:
 
 ```text
-${XDG_STATE_HOME:-~/.local/state}/omarchy/omarchy-tuxedo.json
+${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/omarchy-tuxedo/state.json
 ```
+
+The state directory is private, state files are limited to 1 MiB, and updates use atomic writes.
 
 For every Tuxedo action, the plugin sets `TODO_FILE` to the configured path and `DONE_FILE` to `done.txt` beside it. Standard todo.txt metadata such as priorities, `+projects`, `@contexts`, and `due:YYYY-MM-DD` is recognized by the panel.
 
 ### File monitoring
 
-Tuxedo Todo Panel monitors the configured todo file with Quickshell's `FileView` and `watchChanges` enabled. Changes are delivered through the native filesystem watcher and reloaded when detected, making monitoring event-driven and avoiding a periodic polling loop.
+Tuxedo Todo Panel uses the bundled Python 3 standard-library helper and a native Linux inotify watcher to monitor the configured todo file. Changes are reloaded when detected, making monitoring event-driven and avoiding a periodic polling loop; there is no scan interval to configure.
 
 The file is also reloaded when the component starts, whenever the panel opens, after a Tuxedo mutation exits, and after the configured todo path changes.
 
@@ -113,6 +118,8 @@ This removes the plugin, not your `todo.txt`, sibling `done.txt`, or saved state
 ## Security and data behavior
 
 Tuxedo Todo Panel works locally. The widget reads and watches the configured todo.txt file, invokes the locally installed `tuxedo` executable for changes, and writes only its small JSON preferences file. It does not include network requests, telemetry, account access, or cloud synchronization. Your task data is sent only to local processes started for the requested Tuxedo action.
+
+For safety, the configured todo path must name a regular file owned by the current user. Final symbolic links, FIFOs, devices, and other non-regular files are rejected. The maximum todo file size is 8 MiB, and each line is limited to 64 KiB. Files that exceed either limit are rejected rather than silently truncated, preserving the exact line numbers used by Tuxedo operations.
 
 ## License
 
