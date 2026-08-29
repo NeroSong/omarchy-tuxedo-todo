@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "omarchy-tuxedo",
-  "name": "Omarchy Tuxedo",
+  "name": "Tuxedo Todo Panel",
   "version": "1.0.0",
   "author": "Luciano Panepucci",
   "description": "A todo.txt task panel powered by Tuxedo",
@@ -12,7 +12,7 @@
     "barWidget": "Tasks.qml"
   },
   "barWidget": {
-    "displayName": "Omarchy Tuxedo",
+    "displayName": "Tuxedo Todo Panel",
     "description": "Browse and update todo.txt tasks directly from the bar",
     "category": "Productivity",
     "allowMultiple": false,

@@ -1,6 +1,6 @@
-# Omarchy Tuxedo
+# Tuxedo Todo Panel
 
-A focused todo.txt task panel for Omarchy Quattro, powered by the [Tuxedo](https://github.com/webstonehq/tuxedo) command-line interface. Omarchy Tuxedo places your open-task count in the bar and lets you browse and update your task file without leaving the desktop.
+A focused todo.txt task panel for Omarchy Quattro, powered by the [Tuxedo](https://github.com/webstonehq/tuxedo) command-line interface. Tuxedo Todo Panel places your open-task count in the bar and lets you browse and update your task file without leaving the desktop.
 
 ## Features
 
@@ -16,7 +16,7 @@ A focused todo.txt task panel for Omarchy Quattro, powered by the [Tuxedo](https
 
 ## Screenshot
 
-![Omarchy Tuxedo task panel](preview.png)
+![Tuxedo Todo Panel](preview.png)
 
 ## Requirements
 
@@ -33,7 +33,7 @@ Install the plugin from GitHub and enable it immediately:
 omarchy plugin add https://github.com/lpanebr/omarchy-tuxedo-todo.git --enable
 ```
 
-The widget is registered as **Omarchy Tuxedo** in the Productivity category. It supports one instance and defaults to the center section of the bar.
+The widget is registered as **Tuxedo Todo Panel** in the Productivity category. It supports one instance and defaults to the center section of the bar.
 
 ## Usage
 
@@ -77,7 +77,7 @@ This removes the plugin, not your `todo.txt`, sibling `done.txt`, or saved state
 
 ## Security and data behavior
 
-Omarchy Tuxedo works locally. The widget reads and watches the configured todo.txt file, invokes the locally installed `tuxedo` executable for changes, and writes only its small JSON preferences file. It does not include network requests, telemetry, account access, or cloud synchronization. Your task data is sent only to local processes started for the requested Tuxedo action.
+Tuxedo Todo Panel works locally. The widget reads and watches the configured todo.txt file, invokes the locally installed `tuxedo` executable for changes, and writes only its small JSON preferences file. It does not include network requests, telemetry, account access, or cloud synchronization. Your task data is sent only to local processes started for the requested Tuxedo action.
 
 ## License
 
