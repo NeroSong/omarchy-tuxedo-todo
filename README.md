@@ -49,6 +49,35 @@ Click the checklist icon in the bar to open the panel.
 
 Completed tasks are handled by Tuxedo and use `done.txt` in the same directory as the configured todo file. Batch deletion is performed with Tuxedo's forced-delete option, so review the selection before deleting.
 
+## Keyboard shortcuts
+
+Shortcuts are active when the task list has focus. Initial focus is on **Search**; use `Tab` and `Shift+Tab` to cycle between Search, the task list, and Add task. Multi-key sequences such as `gg`, `dd`, `yy`, `fp`, and `fc` are typed consecutively.
+
+### Navigation
+
+- `j` / `k` — move down or up
+- `gg` / `G` — jump to the first or last task
+- `Ctrl+D` / `Ctrl+U` — move a page down or up
+
+### Editing and actions
+
+- `e` / `i` — edit the active task
+- `x` — complete the active task; it disappears from the open-task list and is not toggled in place
+- `dd` — delete the active task, or all selected tasks
+- `yy` — copy the active task's raw todo.txt line
+- `Space` — select or deselect the active task
+
+> **Warning:** Deletion with `dd` is irreversible and has no undo. Check the active task and selection before using it.
+
+### View and filtering
+
+- `fp` / `fc` — open the project or context sidebar
+- In a sidebar, `j` / `k` moves between filters and `Space` toggles the active filter
+- `D` — toggle task density
+- `S` — cycle the sort mode
+- `?` — open shortcut help
+- `Esc` — contextually step back, cancel, or close the current view
+
 ## todo.txt location and configuration
 
 By default, the plugin reads:

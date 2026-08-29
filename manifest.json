@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "omarchy-tuxedo",
   "name": "Tuxedo Todo Panel",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "Luciano Panepucci",
   "description": "A todo.txt task panel powered by Tuxedo",
   "kinds": [

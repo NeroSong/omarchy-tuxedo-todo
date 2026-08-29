@@ -35,12 +35,18 @@ Panel {
   property var selectedLines: ({})
   property int selectionRevision: 0
   property int editingLineNumber: 0
+  property int activeTaskIndex: 0
+  property int sidebarCursor: 0
+  property string keyPrefix: ""
   readonly property int dueCount: tasks.filter(function(task) { return task.isDue }).length
   readonly property int badgeCount: badgeDueOnly ? dueCount : tasks.length
   readonly property int selectedCount: {
     var revision = selectionRevision
     return Object.keys(selectedLines).length
   }
+  readonly property int sidebarEntryCount: projects.length + contexts.length
+  readonly property var activeTask: visibleTasks.length > 0 && activeTaskIndex >= 0
+    ? visibleTasks[Math.min(activeTaskIndex, visibleTasks.length - 1)] : null
 
   readonly property var visibleTasks: {
     var revision = dataRevision
@@ -78,6 +84,7 @@ Panel {
   }
 
   function parseTodo(raw) {
+    var wasEditing = editingLineNumber !== 0
     var nextTasks = []
     var projectSet = {}
     var contextSet = {}
@@ -107,6 +114,7 @@ Panel {
       }
       nextTasks.push({
         lineNumber: i + 1,
+        rawText: lines[i].replace(/\r$/, ""),
         text: line,
         displayText: displayText(line),
         projects: taskProjects,
@@ -125,6 +133,8 @@ Panel {
     selectionRevision++
     editingLineNumber = 0
     dataRevision++
+    clampActiveTask()
+    if (wasEditing) Qt.callLater(function() { taskList.forceActiveFocus() })
   }
 
   function displayText(line) {
@@ -140,6 +150,133 @@ Panel {
     filterKind = kind
     filterValue = value || ""
     taskList.positionViewAtBeginning()
+    clampActiveTask()
+  }
+
+  function clampActiveTask() {
+    if (visibleTasks.length === 0) activeTaskIndex = 0
+    else activeTaskIndex = Math.max(0, Math.min(activeTaskIndex, visibleTasks.length - 1))
+    Qt.callLater(function() {
+      if (visibleTasks.length > 0) taskList.positionViewAtIndex(activeTaskIndex, ListView.Contain)
+    })
+  }
+
+  function moveActiveTask(delta) {
+    if (visibleTasks.length === 0) return
+    activeTaskIndex = Math.max(0, Math.min(activeTaskIndex + delta, visibleTasks.length - 1))
+    taskList.positionViewAtIndex(activeTaskIndex, ListView.Contain)
+  }
+
+  function setActiveTask(index) {
+    if (visibleTasks.length === 0) return
+    activeTaskIndex = Math.max(0, Math.min(index, visibleTasks.length - 1))
+    taskList.positionViewAtIndex(activeTaskIndex, ListView.Contain)
+  }
+
+  function clearPrefix() {
+    keyPrefix = ""
+    chordTimer.stop()
+  }
+
+  function beginPrefix(prefix) {
+    keyPrefix = prefix
+    chordTimer.restart()
+  }
+
+  function focusTaskList() {
+    clearPrefix()
+    panelMode = "tasks"
+    filterSidebarOpen = false
+    Qt.callLater(function() { taskList.forceActiveFocus() })
+  }
+
+  function openSidebar(kind) {
+    clearPrefix()
+    filterSidebarOpen = true
+    sidebarCursor = kind === "context" ? projects.length : 0
+    if (sidebarEntryCount > 0) sidebarCursor = Math.min(sidebarCursor, sidebarEntryCount - 1)
+    Qt.callLater(function() { filterSidebar.forceActiveFocus() })
+  }
+
+  function activateSidebarCursor() {
+    if (sidebarEntryCount === 0) return
+    var kind = sidebarCursor < projects.length ? "project" : "context"
+    var value = kind === "project" ? projects[sidebarCursor] : contexts[sidebarCursor - projects.length]
+    if (filterKind === kind && filterValue === value) selectFilter("all", "")
+    else selectFilter(kind, value)
+  }
+
+  function positionSidebarCursor() {
+    if (!filterSidebarOpen || sidebarEntryCount === 0) return
+    var item = sidebarCursor < projects.length
+      ? projectRepeater.itemAt(sidebarCursor)
+      : contextRepeater.itemAt(sidebarCursor - projects.length)
+    if (!item) return
+    var y = item.mapToItem(sidebarColumn, 0, 0).y
+    if (y < sidebarFlick.contentY) sidebarFlick.contentY = y
+    else if (y + item.height > sidebarFlick.contentY + sidebarFlick.height)
+      sidebarFlick.contentY = y + item.height - sidebarFlick.height
+  }
+
+  function deleteActiveOrSelected() {
+    if (actionProcess.running) return
+    var numbers = selectedCount > 0 ? selectedTaskNumbers(true)
+      : (activeTask ? [activeTask.lineNumber] : [])
+    if (numbers.length === 0) return
+    statusMessage = "Deleting " + numbers.length + " task(s)…"
+    actionProcess.command = tuxedoCommand(["del"].concat(numbers.map(String)).concat(["-f"]))
+    actionProcess.running = true
+  }
+
+  function copyActiveTask() {
+    if (!activeTask) return
+    Quickshell.clipboardText = activeTask.rawText
+    statusMessage = "Copied task"
+  }
+
+  function handleListKey(event) {
+    if (!taskList.activeFocus || panelMode !== "tasks" || filterSidebarOpen || editingLineNumber !== 0) return false
+    if (event.key === Qt.Key_Escape) {
+      clearPrefix()
+      close()
+      return true
+    }
+    var keyText = String(event.text || "")
+    var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
+    var page = Math.max(1, Math.floor(taskList.height / Style.space(twoLineDescriptions ? 64 : 48)))
+
+    if (keyPrefix !== "") {
+      var chord = keyPrefix + keyText.toLowerCase()
+      clearPrefix()
+      if (chord === "gg") { setActiveTask(0); return true }
+      if (chord === "dd") { deleteActiveOrSelected(); return true }
+      if (chord === "yy") { copyActiveTask(); return true }
+      if (chord === "fp") { openSidebar("project"); return true }
+      if (chord === "fc") { openSidebar("context"); return true }
+    }
+
+    if (ctrl && event.key === Qt.Key_D) { moveActiveTask(page); return true }
+    if (ctrl && event.key === Qt.Key_U) { moveActiveTask(-page); return true }
+    if (event.key === Qt.Key_J && !ctrl) { moveActiveTask(1); return true }
+    if (event.key === Qt.Key_K && !ctrl) { moveActiveTask(-1); return true }
+    if (keyText === "G") { setActiveTask(visibleTasks.length - 1); return true }
+    if (keyText === "D") { toggleDescriptionLines(); return true }
+    if (keyText === "S") { cycleSortMode(); return true }
+    if (event.key === Qt.Key_E || event.key === Qt.Key_I) { startEditing(activeTask); return true }
+    if (event.key === Qt.Key_X) { completeTask(activeTask); return true }
+    if (event.key === Qt.Key_Space) { toggleSelected(activeTask); return true }
+    if (keyText === "?") {
+      clearPrefix()
+      panelMode = "help"
+      Qt.callLater(function() { helpView.forceActiveFocus() })
+      return true
+    }
+    if (["g", "d", "y", "f"].indexOf(keyText.toLowerCase()) >= 0) {
+      beginPrefix(keyText.toLowerCase())
+      return true
+    }
+    clearPrefix()
+    return false
   }
 
   function donePath() {
@@ -209,6 +346,7 @@ Panel {
 
   function cancelEditing() {
     editingLineNumber = 0
+    Qt.callLater(function() { taskList.forceActiveFocus() })
   }
 
   function saveEditing(task, text) {
@@ -276,6 +414,7 @@ Panel {
     sortMode = modes[(current + 1) % modes.length]
     saveState()
     taskList.positionViewAtBeginning()
+    clampActiveTask()
   }
 
   function showSettings() {
@@ -312,11 +451,22 @@ Panel {
       editingLineNumber = 0
       panelMode = "tasks"
       filterSidebarOpen = false
+      clearPrefix()
       return
     }
     todoFile.reload()
     statusMessage = ""
     Qt.callLater(function() { searchField.forceActiveFocus() })
+  }
+
+  onVisibleTasksChanged: clampActiveTask()
+  onSidebarCursorChanged: Qt.callLater(positionSidebarCursor)
+
+  Timer {
+    id: chordTimer
+    interval: 700
+    repeat: false
+    onTriggered: root.keyPrefix = ""
   }
 
   Component.onCompleted: {
@@ -422,7 +572,8 @@ Panel {
     owner: root
     bar: root.bar
     open: root.opened
-    focusTarget: root.panelMode === "settings" ? settingsPathField : searchField
+    focusTarget: root.panelMode === "settings" ? settingsPathField
+      : (root.panelMode === "help" ? helpView : searchField)
     contentWidth: panel.fittedContentWidth(Style.space(520))
     contentHeight: panel.fittedContentHeight(Style.space(610), Style.space(680))
 
@@ -507,6 +658,8 @@ Panel {
         font.family: root.fontFamily
         onTextChanged: root.searchText = text
         Keys.onEscapePressed: root.close()
+        Keys.onTabPressed: root.focusTaskList()
+        Keys.onBacktabPressed: addField.forceActiveFocus()
       }
 
       Row {
@@ -573,6 +726,23 @@ Panel {
           width: Style.space(138)
           radius: Style.cornerRadius
           color: Style.normalFillFor(root.foreground, Color.accent)
+          focus: false
+
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Escape) {
+              root.focusTaskList()
+              event.accepted = true
+            } else if (event.key === Qt.Key_J) {
+              if (root.sidebarEntryCount > 0) root.sidebarCursor = Math.min(root.sidebarCursor + 1, root.sidebarEntryCount - 1)
+              event.accepted = true
+            } else if (event.key === Qt.Key_K) {
+              if (root.sidebarEntryCount > 0) root.sidebarCursor = Math.max(root.sidebarCursor - 1, 0)
+              event.accepted = true
+            } else if (event.key === Qt.Key_Space) {
+              root.activateSidebarCursor()
+              event.accepted = true
+            }
+          }
 
           Column {
             anchors.fill: parent
@@ -603,6 +773,7 @@ Panel {
             }
 
             Flickable {
+              id: sidebarFlick
               width: parent.width
               height: parent.height - Style.space(32)
               contentWidth: width
@@ -625,13 +796,16 @@ Panel {
                 }
 
                 Repeater {
+                  id: projectRepeater
                   model: root.projects
                   TextAction {
+                    required property int index
                     required property string modelData
                     width: sidebarColumn.width
                     label: "+" + modelData
                     leftAlign: true
                     selected: root.filterKind === "project" && root.filterValue === modelData
+                    cursorHighlighted: filterSidebar.activeFocus && root.sidebarCursor === index
                     onActivated: root.selectFilter("project", modelData)
                   }
                 }
@@ -647,13 +821,16 @@ Panel {
                 }
 
                 Repeater {
+                  id: contextRepeater
                   model: root.contexts
                   TextAction {
+                    required property int index
                     required property string modelData
                     width: sidebarColumn.width
                     label: "@" + modelData
                     leftAlign: true
                     selected: root.filterKind === "context" && root.filterValue === modelData
+                    cursorHighlighted: filterSidebar.activeFocus && root.sidebarCursor === root.projects.length + index
                     onActivated: root.selectFilter("context", modelData)
                   }
                 }
@@ -672,18 +849,32 @@ Panel {
           clip: true
           spacing: Style.space(2)
           boundsBehavior: Flickable.StopAtBounds
+          focus: false
+          activeFocusOnTab: false
+
+          Keys.onTabPressed: addField.forceActiveFocus()
+          Keys.onBacktabPressed: searchField.forceActiveFocus()
+          Keys.onPressed: function(event) {
+            if (root.handleListKey(event)) event.accepted = true
+          }
 
         delegate: Rectangle {
           id: taskRow
+          required property int index
           required property var modelData
           readonly property bool selected: root.isSelected(modelData)
+          readonly property bool active: taskList.activeFocus && index === root.activeTaskIndex
           readonly property bool editing: root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
           height: Style.space(editing ? 52 : (root.twoLineDescriptions ? 64 : 48))
           radius: Style.cornerRadius
           color: selected
             ? Style.selectedFillFor(root.foreground, Color.accent)
-            : (taskMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent")
+            : (active
+              ? Style.hoverFillFor(root.foreground, Color.accent)
+              : (taskMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"))
+          border.width: active ? 2 : 0
+          border.color: Color.accent
 
           MouseArea {
             id: taskMouse
@@ -691,7 +882,10 @@ Panel {
             enabled: !taskRow.editing
             hoverEnabled: true
             cursorShape: Qt.PointingHandCursor
-            onClicked: root.toggleSelected(taskRow.modelData)
+            onClicked: {
+              root.activeTaskIndex = index
+              root.toggleSelected(taskRow.modelData)
+            }
           }
 
           Row {
@@ -737,6 +931,7 @@ Panel {
               Text {
                 width: parent.width
                 text: modelData.displayText
+                textFormat: Text.PlainText
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
@@ -753,6 +948,7 @@ Panel {
                   .concat(modelData.projects.map(function(v) { return "+" + v }))
                   .concat(modelData.contexts.map(function(v) { return "@" + v }))
                   .join("  ")
+                textFormat: Text.PlainText
                 color: Color.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
@@ -766,6 +962,7 @@ Panel {
               width: Style.space(80)
               horizontalAlignment: Text.AlignRight
               text: modelData.overdue ? "overdue" : modelData.due
+              textFormat: Text.PlainText
               color: modelData.isDue ? root.urgent : root.dim
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -833,6 +1030,7 @@ Panel {
           anchors.centerIn: parent
           visible: root.visibleTasks.length === 0
           text: "No tasks in " + root.filterLabel()
+          textFormat: Text.PlainText
           color: root.dim
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
@@ -860,6 +1058,8 @@ Panel {
         font.family: root.fontFamily
         onAccepted: root.addTask(text)
         Keys.onEscapePressed: root.close()
+        Keys.onTabPressed: searchField.forceActiveFocus()
+        Keys.onBacktabPressed: root.focusTaskList()
       }
 
       Row {
@@ -887,6 +1087,65 @@ Panel {
           accent: root.urgent
           fontFamily: root.fontFamily
           onClicked: root.deleteSelected()
+        }
+      }
+
+      FocusScope {
+        id: helpView
+        visible: root.panelMode === "help"
+        width: parent.width
+        height: parent.height - Style.space(74)
+        focus: visible
+
+        Keys.onEscapePressed: root.focusTaskList()
+
+        Flickable {
+          anchors.fill: parent
+          contentWidth: width
+          contentHeight: helpColumn.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+
+          Column {
+            id: helpColumn
+            width: parent.width
+            spacing: Style.space(16)
+
+            HelpSection {
+              title: "NAVIGATION"
+              shortcuts: [
+                ["j / ↓", "next task"],
+                ["k / ↑", "previous task"],
+                ["gg", "first task"],
+                ["G", "last task"],
+                ["Ctrl+D / Ctrl+U", "page down / up"],
+                ["Tab / Shift+Tab", "search / list / add"]
+              ]
+            }
+
+            HelpSection {
+              title: "EDITING"
+              shortcuts: [
+                ["e / i", "edit active task"],
+                ["x", "complete task"],
+                ["dd", "delete selected or active"],
+                ["yy", "copy raw todo.txt line"],
+                ["Space", "toggle selection"]
+              ]
+            }
+
+            HelpSection {
+              title: "VIEW & FILTERS"
+              shortcuts: [
+                ["fp / fc", "project / context filters"],
+                ["j / k", "navigate sidebar"],
+                ["Space", "toggle highlighted filter"],
+                ["D", "toggle density"],
+                ["S", "cycle sort mode"],
+                ["? / Esc", "help / back"]
+              ]
+            }
+          }
         }
       }
 
@@ -970,11 +1229,21 @@ Panel {
     property string iconText: ""
     property bool selected: false
     property bool leftAlign: false
+    property bool cursorHighlighted: false
     signal activated()
     implicitWidth: actionRow.implicitWidth
     implicitHeight: Style.space(24)
     width: implicitWidth
     height: implicitHeight
+
+    Rectangle {
+      anchors.fill: parent
+      anchors.margins: -Style.space(2)
+      radius: Style.cornerRadius
+      color: action.cursorHighlighted ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"
+      border.width: action.cursorHighlighted ? 1 : 0
+      border.color: Color.accent
+    }
 
     Row {
       id: actionRow
@@ -999,6 +1268,7 @@ Panel {
           ? Math.max(0, action.width - (actionIcon.visible ? actionIcon.width + actionRow.spacing : 0))
           : implicitWidth
         text: action.label
+        textFormat: Text.PlainText
         color: action.selected ? Color.accent : (actionMouse.containsMouse ? root.foreground : root.dim)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -1014,6 +1284,53 @@ Panel {
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
       onClicked: action.activated()
+    }
+  }
+
+  component HelpSection: Column {
+    required property string title
+    required property var shortcuts
+    width: parent ? parent.width : 0
+    spacing: Style.space(5)
+
+    Text {
+      text: parent.title
+      textFormat: Text.PlainText
+      color: root.dim
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      font.bold: true
+      font.letterSpacing: 1.2
+    }
+
+    Repeater {
+      model: parent.shortcuts
+
+      Row {
+        required property var modelData
+        width: parent.width
+        spacing: Style.space(12)
+
+        Text {
+          width: Style.space(176)
+          text: modelData[0]
+          textFormat: Text.PlainText
+          color: Color.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          font.bold: true
+        }
+
+        Text {
+          width: parent.width - Style.space(188)
+          text: modelData[1]
+          textFormat: Text.PlainText
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+      }
     }
   }
 }
