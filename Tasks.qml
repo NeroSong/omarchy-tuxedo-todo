@@ -150,7 +150,7 @@ Panel {
     editingLineNumber = 0
     dataRevision++
     clampActiveTask()
-    if (wasEditing) Qt.callLater(function() { taskList.forceActiveFocus() })
+    if (wasEditing) Qt.callLater(function() { taskKeyCatcher.forceActiveFocus() })
   }
 
   function displayText(line) {
@@ -203,7 +203,7 @@ Panel {
     clearPrefix()
     panelMode = "tasks"
     filterSidebarOpen = false
-    Qt.callLater(function() { taskList.forceActiveFocus() })
+    Qt.callLater(function() { taskKeyCatcher.forceActiveFocus() })
   }
 
   function openSidebar(kind) {
@@ -251,7 +251,7 @@ Panel {
   }
 
   function handleListKey(event) {
-    if (!taskList.activeFocus || panelMode !== "tasks" || filterSidebarOpen || editingLineNumber !== 0) return false
+    if (!taskKeyCatcher.activeFocus || panelMode !== "tasks" || filterSidebarOpen || editingLineNumber !== 0) return false
     if (event.key === Qt.Key_Escape) {
       clearPrefix()
       close()
@@ -362,13 +362,13 @@ Panel {
 
   function cancelEditing() {
     editingLineNumber = 0
-    Qt.callLater(function() { taskList.forceActiveFocus() })
+    focusTaskList()
   }
 
   function saveEditing(task, text) {
     var value = String(text || "").trim()
     if (!task || value === "" || value === task.text || actionProcess.running) {
-      editingLineNumber = 0
+      cancelEditing()
       return
     }
     statusMessage = "Saving…"
@@ -569,7 +569,6 @@ Panel {
 
   onVisibleTasksChanged: clampActiveTask()
   onSidebarCursorChanged: Qt.callLater(positionSidebarCursor)
-
   Timer {
     id: chordTimer
     interval: 700
@@ -778,6 +777,19 @@ Panel {
       : (root.panelMode === "help" ? helpView : searchField)
     contentWidth: panel.fittedContentWidth(Style.space(520))
     contentHeight: panel.fittedContentHeight(Style.space(610), Style.space(680))
+
+    Item {
+      id: taskKeyCatcher
+      width: 0
+      height: 0
+      focus: false
+
+      Keys.onTabPressed: addField.forceActiveFocus()
+      Keys.onBacktabPressed: searchField.forceActiveFocus()
+      Keys.onPressed: function(event) {
+        if (root.handleListKey(event)) event.accepted = true
+      }
+    }
 
     Column {
       anchors.fill: parent
@@ -1054,18 +1066,12 @@ Panel {
           focus: false
           activeFocusOnTab: false
 
-          Keys.onTabPressed: addField.forceActiveFocus()
-          Keys.onBacktabPressed: searchField.forceActiveFocus()
-          Keys.onPressed: function(event) {
-            if (root.handleListKey(event)) event.accepted = true
-          }
-
         delegate: Rectangle {
           id: taskRow
           required property int index
           required property var modelData
           readonly property bool selected: root.isSelected(modelData)
-          readonly property bool active: taskList.activeFocus && index === root.activeTaskIndex
+          readonly property bool active: taskKeyCatcher.activeFocus && index === root.activeTaskIndex
           readonly property bool editing: root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
           height: Style.space(editing ? 52 : (root.twoLineDescriptions ? 64 : 48))
@@ -1203,7 +1209,10 @@ Panel {
                 editField.forceActiveFocus()
                 editField.selectAll()
               })
-              Keys.onEscapePressed: root.cancelEditing()
+              Keys.onEscapePressed: function(event) {
+                root.cancelEditing()
+                event.accepted = true
+              }
             }
 
             PanelActionButton {
