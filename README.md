@@ -65,6 +65,12 @@ ${XDG_STATE_HOME:-~/.local/state}/omarchy/omarchy-tuxedo.json
 
 For every Tuxedo action, the plugin sets `TODO_FILE` to the configured path and `DONE_FILE` to `done.txt` beside it. Standard todo.txt metadata such as priorities, `+projects`, `@contexts`, and `due:YYYY-MM-DD` is recognized by the panel.
 
+### File monitoring
+
+Tuxedo Todo Panel monitors the configured todo file with Quickshell's `FileView` and `watchChanges` enabled. Changes are delivered through the native filesystem watcher and reloaded when detected, making monitoring event-driven and avoiding a periodic polling loop. There is therefore no scan interval to configure.
+
+The file is also reloaded when the component starts, whenever the panel opens, after a Tuxedo mutation exits, and after the configured todo path changes.
+
 ## Removal
 
 Remove the plugin by its manifest ID:
