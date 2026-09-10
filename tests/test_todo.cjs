@@ -54,3 +54,32 @@ test('navigation accepts arrows, j/k and Ctrl+N/P with exact modifiers', () => {
     [Qt.Key_N, 3, 0], [Qt.Key_Down, 2, 0]
   ]) assert.equal(context.navigationDelta({ key, modifiers }), expected);
 });
+
+test('search shortcuts navigate and complete without changing focus or query', () => {
+  const qml = readFileSync(require('node:path').join(__dirname, '../Tasks.qml'), 'utf8');
+  const source = qml.match(/  function handleQuickTaskKey\(event\) \{[\s\S]*?\n  \}/)[0];
+  const calls = [];
+  const context = vm.createContext({
+    Qt: { ControlModifier: 1, AltModifier: 2, Key_N: 78, Key_P: 80, Key_X: 88 },
+    panelMode: 'tasks', editingLineNumber: 0,
+    searchField: { activeFocus: true, text: 'invoice' },
+    taskKeyCatcher: { activeFocus: false }, activeTask: { lineNumber: 7 },
+    clearPrefix() {}, moveActiveTask(delta) { calls.push(delta); },
+    completeTask(task) { calls.push(task.lineNumber); }
+  });
+  vm.runInContext(source, context);
+  assert.equal(context.handleQuickTaskKey({ key: 78, modifiers: 1 }), true);
+  assert.equal(context.handleQuickTaskKey({ key: 80, modifiers: 1 }), true);
+  assert.equal(context.handleQuickTaskKey({ key: 88, modifiers: 2 }), true);
+  assert.deepEqual(calls, [1, -1, 7]);
+  assert.equal(context.searchField.activeFocus, true);
+  assert.equal(context.searchField.text, 'invoice');
+  assert.equal(context.handleQuickTaskKey({ key: 88, modifiers: 0 }), false);
+  assert.equal(context.handleQuickTaskKey({ key: 88, modifiers: 3 }), false);
+  context.editingLineNumber = 7;
+  assert.equal(context.handleQuickTaskKey({ key: 88, modifiers: 2 }), false);
+  context.editingLineNumber = 0;
+  context.searchField.activeFocus = false;
+  assert.equal(context.handleQuickTaskKey({ key: 88, modifiers: 2 }), false);
+  assert.deepEqual(calls, [1, -1, 7]);
+});

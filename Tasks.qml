@@ -243,8 +243,25 @@ Panel {
     statusMessage = "Copied task"
   }
 
+  function handleQuickTaskKey(event) {
+    if (panelMode !== "tasks" || editingLineNumber !== 0
+        || (!searchField.activeFocus && !taskKeyCatcher.activeFocus)) return false
+    if (event.modifiers === Qt.ControlModifier && (event.key === Qt.Key_N || event.key === Qt.Key_P)) {
+      clearPrefix()
+      moveActiveTask(event.key === Qt.Key_N ? 1 : -1)
+      return true
+    }
+    if (event.modifiers === Qt.AltModifier && event.key === Qt.Key_X) {
+      clearPrefix()
+      completeTask(activeTask)
+      return true
+    }
+    return false
+  }
+
   function handleListKey(event) {
     if (!taskKeyCatcher.activeFocus || panelMode !== "tasks" || filterSidebarOpen || editingLineNumber !== 0) return false
+    if (handleQuickTaskKey(event)) return true
     if ((event.text === "/" && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) === 0)
         || (event.key === Qt.Key_K && event.modifiers === Qt.ControlModifier)) {
       clearPrefix()
@@ -887,6 +904,9 @@ Panel {
         accent: Color.accent
         font.family: root.fontFamily
         onTextChanged: root.searchText = text
+        Keys.onPressed: function(event) {
+          if (root.handleQuickTaskKey(event)) event.accepted = true
+        }
         Keys.onEscapePressed: root.close()
         Keys.onTabPressed: root.focusTaskList()
         Keys.onBacktabPressed: addField.forceActiveFocus()
@@ -1100,7 +1120,8 @@ Panel {
           required property int index
           required property var modelData
           readonly property bool selected: root.isSelected(modelData)
-          readonly property bool active: taskKeyCatcher.activeFocus && index === root.activeTaskIndex
+          readonly property bool active: (taskKeyCatcher.activeFocus || searchField.activeFocus)
+            && index === root.activeTaskIndex
           readonly property bool editing: root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
           height: editing ? Math.max(Style.space(90), editField.implicitHeight + Style.space(12))
@@ -1380,6 +1401,7 @@ Panel {
               shortcuts: [
                 ["e / i", "edit active task"],
                 ["x", "complete task"],
+                ["Alt+X", "complete (search / list)"],
                 ["dd", "delete selected or active"],
                 ["yy", "copy raw todo.txt line"],
                 ["Space", "toggle selection"]
@@ -1392,6 +1414,7 @@ Panel {
                 ["fp / fc", "project / context filters"],
                 ["Ctrl+A", "All (clear filter)"],
                 ["/ / Ctrl+K", "focus search"],
+                ["Ctrl+N / Ctrl+P", "navigate while searching"],
                 ["j / ↓ / Ctrl+N", "next sidebar filter"],
                 ["k / ↑ / Ctrl+P", "previous sidebar filter"],
                 ["Space", "toggle highlighted filter"],

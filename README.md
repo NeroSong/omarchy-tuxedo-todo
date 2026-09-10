@@ -61,6 +61,8 @@ Completed tasks are handled by Tuxedo and use `done.txt` in the same directory a
 
 Shortcuts are active when the task list has focus. Initial focus is on **Search**; use `Tab` and `Shift+Tab` to cycle between Search, the task list, and Add task. Multi-key sequences such as `gg`, `dd`, `yy`, `fp`, and `fc` are typed consecutively.
 
+While **Search** has focus, `Ctrl+N` / `Ctrl+P` moves through the matching tasks and `Alt+X` completes the highlighted task. Focus and search text stay in Search so you can keep filtering and completing tasks. These shortcuts also work from the task list; they do not apply in Add task or the task editor.
+
 ### Navigation
 
 - `j` / `k`, `↓` / `↑`, or `Ctrl+N` / `Ctrl+P` — move down or up
