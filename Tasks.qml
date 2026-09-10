@@ -4,11 +4,22 @@ import Quickshell
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
+import "Todo.js" as Todo
 
 Panel {
   id: root
   moduleName: "omarchy-tuxedo"
   ipcTarget: "omarchy-tuxedo"
+  manageIpc: false
+
+  IpcHandler {
+    target: root.ipcTarget
+    function open(): void { root.toggle() }
+    function toggle(): void { root.toggle() }
+    function show(): void { root.open() }
+    function close(): void { root.close() }
+    function hide(): void { root.close() }
+  }
 
   readonly property string defaultTodoPath: Quickshell.env("HOME") + "/todo.txt"
   readonly property string statePath: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state")
@@ -28,6 +39,8 @@ Panel {
   property var tasks: []
   property var projects: []
   property var contexts: []
+  readonly property var projectCounts: Todo.counts(tasks, "projects")
+  readonly property var contextCounts: Todo.counts(tasks, "contexts")
   property string filterKind: "all"
   property string filterValue: ""
   property string searchText: ""
@@ -102,44 +115,21 @@ Panel {
   function parseTodo(raw) {
     var wasEditing = editingLineNumber !== 0
     var nextTasks = []
-    var projectSet = {}
-    var contextSet = {}
+    var projectSet = Object.create(null)
+    var contextSet = Object.create(null)
     var lines = String(raw || "").split("\n")
     var today = todayIso()
 
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim()
       if (line === "" || /^x\s/.test(line)) continue
-      var words = line.split(/\s+/)
-      var taskProjects = []
-      var taskContexts = []
-      var due = ""
-      for (var j = 0; j < words.length; j++) {
-        var word = words[j]
-        if (/^\+[^+\s]+$/.test(word)) {
-          var project = word.slice(1)
-          taskProjects.push(project)
-          projectSet[project] = true
-        } else if (/^@[^@\s]+$/.test(word)) {
-          var context = word.slice(1)
-          taskContexts.push(context)
-          contextSet[context] = true
-        } else if (/^due:\d{4}-\d{2}-\d{2}$/.test(word)) {
-          due = word.slice(4)
-        }
-      }
-      nextTasks.push({
-        lineNumber: i + 1,
-        rawText: lines[i].replace(/\r$/, ""),
-        text: line,
-        displayText: displayText(line),
-        projects: taskProjects,
-        contexts: taskContexts,
-        due: due,
-        isDue: due !== "" && due <= today,
-        overdue: due !== "" && due < today,
-        priority: /^\([A-Z]\)\s/.test(line) ? line.slice(1, 2) : ""
-      })
+      var task = Todo.parseLine(lines[i])
+      task.projects.forEach(function(value) { projectSet[value] = true })
+      task.contexts.forEach(function(value) { contextSet[value] = true })
+      task.lineNumber = i + 1
+      task.isDue = task.due !== "" && task.due <= today
+      task.overdue = task.due !== "" && task.due < today
+      nextTasks.push(task)
     }
 
     tasks = nextTasks
@@ -153,13 +143,16 @@ Panel {
     if (wasEditing) Qt.callLater(function() { taskKeyCatcher.forceActiveFocus() })
   }
 
-  function displayText(line) {
-    return String(line)
-      .replace(/^\([A-Z]\)\s+/, "")
-      .replace(/^\d{4}-\d{2}-\d{2}\s+/, "")
-      .replace(/\s+(?:due|t|rec):\S+/g, "")
-      .replace(/\s+[+@]\S+/g, "")
-      .trim()
+  function navigationDelta(event) {
+    if (event.modifiers === Qt.ControlModifier) {
+      if (event.key === Qt.Key_N) return 1
+      if (event.key === Qt.Key_P) return -1
+    }
+    if (event.modifiers === Qt.NoModifier) {
+      if (event.key === Qt.Key_J || event.key === Qt.Key_Down) return 1
+      if (event.key === Qt.Key_K || event.key === Qt.Key_Up) return -1
+    }
+    return 0
   }
 
   function selectFilter(kind, value) {
@@ -252,6 +245,17 @@ Panel {
 
   function handleListKey(event) {
     if (!taskKeyCatcher.activeFocus || panelMode !== "tasks" || filterSidebarOpen || editingLineNumber !== 0) return false
+    if ((event.text === "/" && (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) === 0)
+        || (event.key === Qt.Key_K && event.modifiers === Qt.ControlModifier)) {
+      clearPrefix()
+      searchField.forceActiveFocus()
+      return true
+    }
+    if (event.key === Qt.Key_A && event.modifiers === Qt.ControlModifier) {
+      clearPrefix()
+      selectFilter("all", "")
+      return true
+    }
     if (event.key === Qt.Key_Escape) {
       clearPrefix()
       close()
@@ -259,7 +263,9 @@ Panel {
     }
     var keyText = String(event.text || "")
     var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
-    var page = Math.max(1, Math.floor(taskList.height / Style.space(twoLineDescriptions ? 64 : 48)))
+    var page = Math.max(1, Math.floor(taskList.height / Style.space(twoLineDescriptions ? 80 : 48)))
+    var delta = navigationDelta(event)
+    if (delta) { clearPrefix(); moveActiveTask(delta); return true }
 
     if (keyPrefix !== "") {
       var chord = keyPrefix + keyText.toLowerCase()
@@ -273,8 +279,6 @@ Panel {
 
     if (ctrl && event.key === Qt.Key_D) { moveActiveTask(page); return true }
     if (ctrl && event.key === Qt.Key_U) { moveActiveTask(-page); return true }
-    if (event.key === Qt.Key_J && !ctrl) { moveActiveTask(1); return true }
-    if (event.key === Qt.Key_K && !ctrl) { moveActiveTask(-1); return true }
     if (keyText === "G") { setActiveTask(visibleTasks.length - 1); return true }
     if (keyText === "D") { toggleDescriptionLines(); return true }
     if (keyText === "S") { cycleSortMode(); return true }
@@ -367,6 +371,10 @@ Panel {
 
   function saveEditing(task, text) {
     var value = String(text || "").trim()
+    if (/[\r\n]/.test(value)) {
+      statusMessage = "A task must be a single line; remove pasted line breaks before saving"
+      return
+    }
     if (!task || value === "" || value === task.text || actionProcess.running) {
       cancelEditing()
       return
@@ -721,6 +729,14 @@ Panel {
   }
 
   implicitWidth: Style.space(38)
+  Process {
+    id: placementProcess
+    stderr: StdioCollector { id: placementError; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.statusMessage = exitCode === 0 ? "Bar position updated" : (placementError.text.trim() || "Could not move the widget")
+    }
+  }
+
   implicitHeight: bar ? bar.barSize : Style.bar.sizeHorizontal
 
   Item {
@@ -925,11 +941,20 @@ Panel {
 
       Rectangle { visible: root.panelMode === "tasks"; width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
 
+      Text {
+        visible: root.panelMode === "tasks"
+        width: parent.width
+        text: root.visibleTasks.length + " matching / " + root.tasks.length + " open tasks"
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+      }
+
       Item {
         id: taskArea
         visible: root.panelMode === "tasks"
         width: parent.width
-        height: parent.height - Style.space(root.selectedCount > 0 ? 251 : 205)
+        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 279 : 233))
 
         Rectangle {
           id: filterSidebar
@@ -937,20 +962,22 @@ Panel {
           anchors.left: parent.left
           anchors.top: parent.top
           anchors.bottom: parent.bottom
-          width: Style.space(138)
+          width: Style.space(165)
           radius: Style.cornerRadius
           color: Style.normalFillFor(root.foreground, Color.accent)
           focus: false
 
           Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Escape) {
+            if (event.key === Qt.Key_A && event.modifiers === Qt.ControlModifier) {
+              root.clearPrefix()
+              root.selectFilter("all", "")
+              event.accepted = true
+            } else if (event.key === Qt.Key_Escape) {
               root.focusTaskList()
               event.accepted = true
-            } else if (event.key === Qt.Key_J) {
-              if (root.sidebarEntryCount > 0) root.sidebarCursor = Math.min(root.sidebarCursor + 1, root.sidebarEntryCount - 1)
-              event.accepted = true
-            } else if (event.key === Qt.Key_K) {
-              if (root.sidebarEntryCount > 0) root.sidebarCursor = Math.max(root.sidebarCursor - 1, 0)
+            } else if (root.navigationDelta(event) !== 0) {
+              if (root.sidebarEntryCount > 0) root.sidebarCursor = Math.max(0,
+                Math.min(root.sidebarCursor + root.navigationDelta(event), root.sidebarEntryCount - 1))
               event.accepted = true
             } else if (event.key === Qt.Key_Space) {
               root.activateSidebarCursor()
@@ -1017,6 +1044,7 @@ Panel {
                     required property string modelData
                     width: sidebarColumn.width
                     label: "+" + modelData
+                    countText: "(" + (root.projectCounts[modelData] || 0) + ")"
                     leftAlign: true
                     selected: root.filterKind === "project" && root.filterValue === modelData
                     cursorHighlighted: filterSidebar.activeFocus && root.sidebarCursor === index
@@ -1042,6 +1070,7 @@ Panel {
                     required property string modelData
                     width: sidebarColumn.width
                     label: "@" + modelData
+                    countText: "(" + (root.contextCounts[modelData] || 0) + ")"
                     leftAlign: true
                     selected: root.filterKind === "context" && root.filterValue === modelData
                     cursorHighlighted: filterSidebar.activeFocus && root.sidebarCursor === root.projects.length + index
@@ -1074,7 +1103,8 @@ Panel {
           readonly property bool active: taskKeyCatcher.activeFocus && index === root.activeTaskIndex
           readonly property bool editing: root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
-          height: Style.space(editing ? 52 : (root.twoLineDescriptions ? 64 : 48))
+          height: editing ? Math.max(Style.space(90), editField.implicitHeight + Style.space(12))
+            : Math.max(Style.space(root.twoLineDescriptions ? 80 : 48), taskDescription.implicitHeight + Style.space(12))
           radius: Style.cornerRadius
           color: selected
             ? Style.selectedFillFor(root.foreground, Color.accent)
@@ -1132,6 +1162,7 @@ Panel {
             }
 
             Column {
+              id: taskDescription
               anchors.verticalCenter: parent.verticalCenter
               width: parent.width - completeBox.width - dueText.width - editButton.width - parent.spacing * 3
               spacing: 2
@@ -1151,15 +1182,14 @@ Panel {
 
               Text {
                 width: parent.width
-                visible: modelData.priority !== "" || modelData.projects.length > 0 || modelData.contexts.length > 0
-                text: (modelData.priority !== "" ? ["(" + modelData.priority + ")"] : [])
-                  .concat(modelData.projects.map(function(v) { return "+" + v }))
-                  .concat(modelData.contexts.map(function(v) { return "@" + v }))
-                  .join("  ")
-                textFormat: Text.PlainText
+                visible: modelData.priority !== "" || modelData.projects.length > 0 || modelData.contexts.length > 0 || modelData.metadata.length > 0
+                text: Todo.metadataHtml(modelData, root.dim, root.urgent)
+                textFormat: Text.StyledText
                 color: Color.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
+                wrapMode: root.twoLineDescriptions ? Text.WordWrap : Text.NoWrap
+                maximumLineCount: root.twoLineDescriptions ? 2 : 1
                 elide: Text.ElideRight
               }
             }
@@ -1196,15 +1226,25 @@ Panel {
             anchors.rightMargin: Style.space(4)
             spacing: Style.space(5)
 
-            TextField {
+            TextArea {
               id: editField
               anchors.verticalCenter: parent.verticalCenter
               width: parent.width - saveEditButton.width - cancelEditButton.width - parent.spacing * 2
-              text: taskRow.editing ? taskRow.modelData.text : ""
-              foreground: root.foreground
-              accent: Color.accent
+              text: taskRow.editing ? taskRow.modelData.rawText : ""
+              textFormat: TextEdit.PlainText
+              wrapMode: TextEdit.Wrap
+              color: root.foreground
+              selectionColor: Color.accent
+              selectedTextColor: Color.background
               font.family: root.fontFamily
-              onAccepted: root.saveEditing(taskRow.modelData, text)
+              font.pixelSize: Style.font.body
+              background: Rectangle {
+                color: Color.background
+                radius: Style.cornerRadius
+                border.color: Color.accent
+              }
+              Keys.onReturnPressed: root.saveEditing(taskRow.modelData, text)
+              Keys.onEnterPressed: root.saveEditing(taskRow.modelData, text)
               onVisibleChanged: if (visible) Qt.callLater(function() {
                 editField.forceActiveFocus()
                 editField.selectAll()
@@ -1253,6 +1293,7 @@ Panel {
         visible: root.panelMode === "tasks" && root.statusMessage !== ""
         width: parent.width
         text: root.statusMessage
+        textFormat: Text.PlainText
         color: root.urgent
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -1325,8 +1366,8 @@ Panel {
             HelpSection {
               title: "NAVIGATION"
               shortcuts: [
-                ["j / ↓", "next task"],
-                ["k / ↑", "previous task"],
+                ["j / ↓ / Ctrl+N", "next task"],
+                ["k / ↑ / Ctrl+P", "previous task"],
                 ["gg", "first task"],
                 ["G", "last task"],
                 ["Ctrl+D / Ctrl+U", "page down / up"],
@@ -1349,7 +1390,10 @@ Panel {
               title: "VIEW & FILTERS"
               shortcuts: [
                 ["fp / fc", "project / context filters"],
-                ["j / k", "navigate sidebar"],
+                ["Ctrl+A", "All (clear filter)"],
+                ["/ / Ctrl+K", "focus search"],
+                ["j / ↓ / Ctrl+N", "next sidebar filter"],
+                ["k / ↑ / Ctrl+P", "previous sidebar filter"],
                 ["Space", "toggle highlighted filter"],
                 ["D", "toggle density"],
                 ["S", "cycle sort mode"],
@@ -1364,6 +1408,29 @@ Panel {
         visible: root.panelMode === "settings"
         width: parent.width
         spacing: Style.space(12)
+
+        Text {
+          text: "Bar position"
+          color: root.foreground
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.subtitle
+        }
+
+        Row {
+          spacing: Style.space(16)
+          Repeater {
+            model: ["left", "center", "right"]
+            TextAction {
+              required property string modelData
+              label: modelData.charAt(0).toUpperCase() + modelData.slice(1)
+              onActivated: {
+                if (placementProcess.running) return
+                placementProcess.command = ["omarchy", "bar", "move", root.moduleName, "--section", modelData]
+                placementProcess.running = true
+              }
+            }
+          }
+        }
 
         Text {
           width: parent.width
@@ -1398,6 +1465,7 @@ Panel {
           visible: root.statusMessage !== ""
           width: parent.width
           text: root.statusMessage
+          textFormat: Text.PlainText
           color: root.urgent
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
@@ -1438,6 +1506,7 @@ Panel {
     id: action
     required property string label
     property string iconText: ""
+    property string countText: ""
     property bool selected: false
     property bool leftAlign: false
     property bool cursorHighlighted: false
@@ -1476,7 +1545,8 @@ Panel {
       Text {
         anchors.verticalCenter: parent.verticalCenter
         width: action.leftAlign
-          ? Math.max(0, action.width - (actionIcon.visible ? actionIcon.width + actionRow.spacing : 0))
+          ? Math.max(0, action.width - (actionIcon.visible ? actionIcon.width + actionRow.spacing : 0)
+            - (actionCount.visible ? actionCount.width + actionRow.spacing : 0))
           : implicitWidth
         text: action.label
         textFormat: Text.PlainText
@@ -1486,6 +1556,16 @@ Panel {
         font.bold: action.selected
         font.underline: actionMouse.containsMouse
         elide: Text.ElideRight
+      }
+
+      Text {
+        id: actionCount
+        visible: action.countText !== ""
+        anchors.verticalCenter: parent.verticalCenter
+        text: action.countText
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
       }
     }
 

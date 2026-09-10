@@ -36,6 +36,8 @@ omarchy plugin add https://github.com/lpanebr/omarchy-tuxedo-todo.git --enable
 
 The widget is registered as **Tuxedo Todo Panel** in the Productivity category. It supports one instance and defaults to the center section of the bar.
 
+Interactive installation offers a left/center/right position selector (unless `--yes` is used). After installation, open **Settings → Bar position** to move the widget to another section.
+
 ## Usage
 
 Click the checklist icon in the bar to open the panel.
@@ -47,6 +49,11 @@ Click the checklist icon in the bar to open the panel.
 - Click a task row to select it; selected tasks can be completed or deleted together.
 - Use the checkbox beside a task to complete it immediately, or the pencil button to edit it.
 - Open **Settings** with the gear button to choose a different todo.txt file.
+- The count below the filters shows matching tasks; sidebar counts show all open tasks for each project or context.
+- Task titles exclude metadata. Projects and contexts appear below the title, followed by `key:value` metadata in a different color. Density controls wrapping of both lines.
+- Editing displays the complete original task, including priority, date, projects, contexts, and metadata, in a wrapping text field. Enter saves; Escape cancels. Pasted line breaks must be removed before saving.
+
+Both the bar click and `omarchy-shell omarchy-tuxedo open` toggle the panel. Use `omarchy-shell omarchy-tuxedo show` when the panel should always stay open.
 
 Completed tasks are handled by Tuxedo and use `done.txt` in the same directory as the configured todo file. Batch deletion is performed with Tuxedo's forced-delete option, so review the selection before deleting.
 
@@ -56,7 +63,7 @@ Shortcuts are active when the task list has focus. Initial focus is on **Search*
 
 ### Navigation
 
-- `j` / `k` — move down or up
+- `j` / `k`, `↓` / `↑`, or `Ctrl+N` / `Ctrl+P` — move down or up
 - `gg` / `G` — jump to the first or last task
 - `Ctrl+D` / `Ctrl+U` — move a page down or up
 
@@ -73,7 +80,9 @@ Shortcuts are active when the task list has focus. Initial focus is on **Search*
 ### View and filtering
 
 - `fp` / `fc` — open the project or context sidebar
-- In a sidebar, `j` / `k` moves between filters and `Space` toggles the active filter
+- `/` or `Ctrl+K` — focus **Search** from the task list
+- `Ctrl+A` — activate **All** from the task list or sidebar (keeps the search text); in text fields, selects all text as usual
+- In a sidebar, `j` / `k`, `↓` / `↑`, or `Ctrl+N` / `Ctrl+P` moves between filters and `Space` toggles the active filter
 - `D` — toggle task density
 - `S` — cycle the sort mode
 - `?` — open shortcut help
@@ -97,6 +106,8 @@ ${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/omarchy-tuxedo/state.json
 
 The state directory is private, state files are limited to 1 MiB, and updates use atomic writes.
 
+Bar placement is saved by Omarchy in its shell configuration through the official `omarchy bar move` command, only when you choose a position in Settings.
+
 For every Tuxedo action, the plugin sets `TODO_FILE` to the configured path and `DONE_FILE` to `done.txt` beside it. Standard todo.txt metadata such as priorities, `+projects`, `@contexts`, and `due:YYYY-MM-DD` is recognized by the panel.
 
 ### File monitoring
@@ -117,7 +128,7 @@ This removes the plugin, not your `todo.txt`, sibling `done.txt`, or saved state
 
 ## Security and data behavior
 
-Tuxedo Todo Panel works locally. The widget reads and watches the configured todo.txt file, invokes the locally installed `tuxedo` executable for changes, and writes only its small JSON preferences file. It does not include network requests, telemetry, account access, or cloud synchronization. Your task data is sent only to local processes started for the requested Tuxedo action.
+Tuxedo Todo Panel works locally. The widget reads and watches the configured todo.txt file, invokes the locally installed `tuxedo` executable for changes, and writes its small JSON preferences file. Choosing a bar position explicitly invokes `omarchy bar move` with a fixed section argument; Omarchy persists that layout in its shell configuration. It does not include network requests, telemetry, account access, or cloud synchronization. Your task data is sent only to local processes started for the requested Tuxedo action. Task-supplied metadata is escaped before styled rendering, and task text is passed as process arguments without a shell.
 
 For safety, the configured todo path must name a regular file owned by the current user. Final symbolic links, FIFOs, devices, and other non-regular files are rejected. The maximum todo file size is 8 MiB, and each line is limited to 64 KiB. Files that exceed either limit are rejected rather than silently truncated, preserving the exact line numbers used by Tuxedo operations.
 
