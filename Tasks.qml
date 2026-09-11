@@ -47,8 +47,8 @@ Panel {
   property int dataRevision: 0
   property string statusMessage: ""
   property string todoPath: defaultTodoPath
+  property bool badgeVisible: true
   property bool badgeDueOnly: false
-  property bool twoLineDescriptions: false
   property bool filterSidebarOpen: false
   property string sortMode: "sort:due"
   property string panelMode: "tasks"
@@ -58,6 +58,18 @@ Panel {
   property int activeTaskIndex: 0
   property int sidebarCursor: 0
   property string keyPrefix: ""
+  property var reopenQueue: []
+  property bool reopeningTasks: false
+  readonly property real settingsContentHeight: settingsTitle.implicitHeight + settingsDescription.implicitHeight
+    + settingsPathField.implicitHeight + settingsActions.height
+    + Style.space(statusMessage === "" ? 36 : 48)
+    + (statusMessage === "" ? 0 : settingsStatus.implicitHeight)
+  readonly property real taskContentHeight: panelMode === "tasks"
+    ? headerRow.implicitHeight + searchField.implicitHeight + filterRow.implicitHeight
+      + taskDivider.height + matchingText.implicitHeight + taskArea.height + addField.implicitHeight
+      + Style.space(statusMessage === "" ? 60 : 70) + (statusMessage === "" ? 0 : taskStatus.implicitHeight)
+    : (panelMode === "help" ? Style.space(480)
+      : headerRow.implicitHeight + Style.space(10) + settingsContentHeight)
   property bool ioReady: false
   property bool todoReadPending: false
   property bool stateReadPending: false
@@ -67,8 +79,9 @@ Panel {
   property bool todoWatcherRestartImmediate: false
   property string todoReadPath: ""
   property string stateWritePayload: ""
-  readonly property int dueCount: tasks.filter(function(task) { return task.isDue }).length
-  readonly property int badgeCount: badgeDueOnly ? dueCount : tasks.length
+  readonly property int openCount: tasks.filter(function(task) { return !task.completed }).length
+  readonly property int dueCount: tasks.filter(function(task) { return !task.completed && task.isDue }).length
+  readonly property int badgeCount: badgeDueOnly ? dueCount : openCount
   readonly property int selectedCount: {
     var revision = selectionRevision
     return Object.keys(selectedLines).length
@@ -83,6 +96,7 @@ Panel {
     var needle = searchText.trim().toLowerCase()
     for (var i = 0; i < tasks.length; i++) {
       var task = tasks[i]
+      if (task.completed !== (filterKind === "completed")) continue
       if (filterKind === "project" && task.projects.indexOf(filterValue) < 0) continue
       if (filterKind === "context" && task.contexts.indexOf(filterValue) < 0) continue
       if (filterKind === "due" && !task.isDue) continue
@@ -122,13 +136,13 @@ Panel {
 
     for (var i = 0; i < lines.length; i++) {
       var line = lines[i].trim()
-      if (line === "" || /^x\s/.test(line)) continue
+      if (line === "") continue
       var task = Todo.parseLine(lines[i])
       task.projects.forEach(function(value) { projectSet[value] = true })
       task.contexts.forEach(function(value) { contextSet[value] = true })
       task.lineNumber = i + 1
-      task.isDue = task.due !== "" && task.due <= today
-      task.overdue = task.due !== "" && task.due < today
+      task.isDue = !task.completed && task.due !== "" && task.due <= today
+      task.overdue = !task.completed && task.due !== "" && task.due < today
       nextTasks.push(task)
     }
 
@@ -156,6 +170,8 @@ Panel {
   }
 
   function selectFilter(kind, value) {
+    selectedLines = ({})
+    selectionRevision++
     filterKind = kind
     filterValue = value || ""
     taskList.positionViewAtBeginning()
@@ -173,12 +189,14 @@ Panel {
   function moveActiveTask(delta) {
     if (visibleTasks.length === 0) return
     activeTaskIndex = Math.max(0, Math.min(activeTaskIndex + delta, visibleTasks.length - 1))
+    selectTask(visibleTasks[activeTaskIndex])
     taskList.positionViewAtIndex(activeTaskIndex, ListView.Contain)
   }
 
   function setActiveTask(index) {
     if (visibleTasks.length === 0) return
     activeTaskIndex = Math.max(0, Math.min(index, visibleTasks.length - 1))
+    selectTask(visibleTasks[activeTaskIndex])
     taskList.positionViewAtIndex(activeTaskIndex, ListView.Contain)
   }
 
@@ -196,6 +214,7 @@ Panel {
     clearPrefix()
     panelMode = "tasks"
     filterSidebarOpen = false
+    setActiveTask(0)
     Qt.callLater(function() { taskKeyCatcher.forceActiveFocus() })
   }
 
@@ -253,7 +272,7 @@ Panel {
     }
     if (event.modifiers === Qt.AltModifier && event.key === Qt.Key_X) {
       clearPrefix()
-      completeTask(activeTask)
+      toggleCompletion()
       return true
     }
     return false
@@ -280,7 +299,7 @@ Panel {
     }
     var keyText = String(event.text || "")
     var ctrl = (event.modifiers & Qt.ControlModifier) !== 0
-    var page = Math.max(1, Math.floor(taskList.height / Style.space(twoLineDescriptions ? 80 : 48)))
+    var page = Math.max(1, Math.floor(taskList.height / Style.space(48)))
     var delta = navigationDelta(event)
     if (delta) { clearPrefix(); moveActiveTask(delta); return true }
 
@@ -297,10 +316,10 @@ Panel {
     if (ctrl && event.key === Qt.Key_D) { moveActiveTask(page); return true }
     if (ctrl && event.key === Qt.Key_U) { moveActiveTask(-page); return true }
     if (keyText === "G") { setActiveTask(visibleTasks.length - 1); return true }
-    if (keyText === "D") { toggleDescriptionLines(); return true }
     if (keyText === "S") { cycleSortMode(); return true }
     if (event.key === Qt.Key_E || event.key === Qt.Key_I) { startEditing(activeTask); return true }
-    if (event.key === Qt.Key_X) { completeTask(activeTask); return true }
+    if (event.key === Qt.Key_X) { toggleCompletion(); return true }
+    if (keyText === "p") { cyclePriority(); return true }
     if (event.key === Qt.Key_Space) { toggleSelected(activeTask); return true }
     if (keyText === "?") {
       clearPrefix()
@@ -325,10 +344,34 @@ Panel {
     return ["env", "TODO_FILE=" + todoPath, "DONE_FILE=" + donePath(), "tuxedo"].concat(args)
   }
 
-  function completeTask(task) {
-    if (!task || actionProcess.running) return
-    statusMessage = "Completing…"
-    actionProcess.command = tuxedoCommand(["do", String(task.lineNumber)])
+  function toggleCompletion(clickedTask) {
+    if (actionProcess.running) return
+    var task = clickedTask || activeTask
+    var numbers = clickedTask ? [clickedTask.lineNumber] : (selectedCount > 0 ? selectedTaskNumbers(false)
+      : (task ? [task.lineNumber] : [])
+    )
+    if (numbers.length === 0 || !task) return
+
+    if (task.completed) {
+      statusMessage = "Reopening " + numbers.length + " task(s)…"
+      reopenQueue = numbers.map(function(lineNumber) {
+        var item = tasks.filter(function(candidate) { return candidate.lineNumber === lineNumber })[0]
+        return item ? ["replace", String(lineNumber),
+          item.rawText.replace(/^\s*x\s+(?:\d{4}-\d{2}-\d{2}\s+)?/, "")] : null
+      }).filter(function(command) { return command !== null })
+      reopeningTasks = true
+      startNextReopen()
+    } else {
+      statusMessage = "Completing " + numbers.length + " task(s)…"
+      actionProcess.command = tuxedoCommand(["do"].concat(numbers.map(String)))
+      actionProcess.running = true
+    }
+  }
+
+  function startNextReopen() {
+    var args = reopenQueue.shift()
+    if (!args) return
+    actionProcess.command = tuxedoCommand(args)
     actionProcess.running = true
   }
 
@@ -337,15 +380,40 @@ Panel {
     return !!task && selectedLines[String(task.lineNumber)] === task.text
   }
 
-  function toggleSelected(task) {
-    if (!task || editingLineNumber !== 0) return
+  function clearSelection() {
+    if (selectedCount === 0) return
+    selectedLines = ({})
+    selectionRevision++
+  }
+
+  function selectTask(task) {
+    if (!task) return
     var next = {}
-    for (var key in selectedLines) next[key] = selectedLines[key]
-    var lineKey = String(task.lineNumber)
-    if (next[lineKey] === task.text) delete next[lineKey]
-    else next[lineKey] = task.text
+    next[String(task.lineNumber)] = task.text
     selectedLines = next
     selectionRevision++
+  }
+
+  function toggleSelected(task) {
+    if (!task || editingLineNumber !== 0) return
+    var lineKey = String(task.lineNumber)
+    var next = {}
+    if (selectedLines[lineKey] !== task.text) next[lineKey] = task.text
+    selectedLines = next
+    selectionRevision++
+    Qt.callLater(function() { taskKeyCatcher.forceActiveFocus() })
+  }
+
+  function cyclePriority() {
+    var task = activeTask
+    if (!task || actionProcess.running) return
+    var next = task.priority === "" ? "A"
+      : (task.priority === "A" ? "B" : (task.priority === "B" ? "C" : ""))
+    statusMessage = next === "" ? "Removing priority…" : "Setting priority " + next + "…"
+    actionProcess.command = next === ""
+      ? tuxedoCommand(["depri", String(task.lineNumber)])
+      : tuxedoCommand(["pri", String(task.lineNumber), next])
+    actionProcess.running = true
   }
 
   function selectedTaskNumbers(descending) {
@@ -356,22 +424,6 @@ Panel {
     }
     numbers.sort(function(a, b) { return descending ? b - a : a - b })
     return numbers
-  }
-
-  function completeSelected() {
-    if (selectedCount === 0 || actionProcess.running) return
-    var numbers = selectedTaskNumbers(false)
-    statusMessage = "Completing " + numbers.length + " task(s)…"
-    actionProcess.command = tuxedoCommand(["do"].concat(numbers.map(String)))
-    actionProcess.running = true
-  }
-
-  function deleteSelected() {
-    if (selectedCount === 0 || actionProcess.running) return
-    var numbers = selectedTaskNumbers(true)
-    statusMessage = "Deleting " + numbers.length + " task(s)…"
-    actionProcess.command = tuxedoCommand(["del"].concat(numbers.map(String)).concat(["-f"]))
-    actionProcess.running = true
   }
 
   function startEditing(task) {
@@ -413,6 +465,7 @@ Panel {
     if (filterKind === "project") return "+" + filterValue
     if (filterKind === "context") return "@" + filterValue
     if (filterKind === "due") return "Due"
+    if (filterKind === "completed") return "Done"
     return "All"
   }
 
@@ -421,8 +474,8 @@ Panel {
     try { state = JSON.parse(String(raw || "")) } catch (e) {}
     var savedPath = state ? String(state.todoPath || "").trim() : ""
     todoPath = savedPath.charAt(0) === "/" ? savedPath : defaultTodoPath
+    badgeVisible = !state || state.badgeVisible !== false
     badgeDueOnly = state && state.badgeDueOnly === true
-    twoLineDescriptions = state && state.twoLineDescriptions === true
     var savedSort = state ? String(state.sortMode || "") : ""
     sortMode = ["sort:due", "sort:file", "sort:priority"].indexOf(savedSort) >= 0
       ? savedSort
@@ -493,8 +546,8 @@ Panel {
     var payload = JSON.stringify({
       version: 1,
       todoPath: todoPath,
+      badgeVisible: badgeVisible,
       badgeDueOnly: badgeDueOnly,
-      twoLineDescriptions: twoLineDescriptions,
       sortMode: sortMode
     })
     if (payload.length > 1024 * 1024) {
@@ -535,11 +588,6 @@ Panel {
     saveState()
   }
 
-  function toggleDescriptionLines() {
-    twoLineDescriptions = !twoLineDescriptions
-    saveState()
-  }
-
   function cycleSortMode() {
     var modes = ["sort:due", "sort:file", "sort:priority"]
     var current = modes.indexOf(sortMode)
@@ -560,7 +608,7 @@ Panel {
 
   function hideSettings() {
     panelMode = "tasks"
-    Qt.callLater(function() { searchField.forceActiveFocus() })
+    Qt.callLater(function() { addField.forceActiveFocus() })
   }
 
   function saveTodoPath(path) {
@@ -589,7 +637,7 @@ Panel {
     }
     requestTodoRead()
     statusMessage = ""
-    Qt.callLater(function() { searchField.forceActiveFocus() })
+    Qt.callLater(function() { addField.forceActiveFocus() })
   }
 
   onVisibleTasksChanged: clampActiveTask()
@@ -735,6 +783,11 @@ Panel {
       onStreamFinished: if (String(text || "").trim() !== "") root.statusMessage = String(text).trim()
     }
     onExited: function(exitCode) {
+      if (root.reopeningTasks && exitCode === 0 && root.reopenQueue.length > 0) {
+        root.startNextReopen()
+        return
+      }
+      root.reopeningTasks = false
       if (exitCode === 0) {
         root.statusMessage = ""
         addField.text = ""
@@ -769,7 +822,7 @@ Panel {
     }
 
     Rectangle {
-      visible: root.badgeCount > 0
+      visible: root.badgeVisible && root.badgeCount > 0
       anchors.right: parent.right
       anchors.top: parent.top
       anchors.rightMargin: 1
@@ -794,8 +847,14 @@ Panel {
       anchors.fill: parent
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
-      onClicked: root.toggle()
-      onEntered: if (root.bar) root.bar.showTooltip(root, root.tasks.length + " open tasks")
+      acceptedButtons: Qt.LeftButton | Qt.RightButton
+      onClicked: function(mouse) {
+        if (mouse.button === Qt.RightButton) {
+          root.badgeVisible = !root.badgeVisible
+          root.saveState()
+        } else root.toggle()
+      }
+      onEntered: if (root.bar) root.bar.showTooltip(root, root.openCount + " open tasks · Right-click to toggle badge")
       onExited: if (root.bar) root.bar.hideTooltip(root)
     }
   }
@@ -807,9 +866,10 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: root.panelMode === "settings" ? settingsPathField
-      : (root.panelMode === "help" ? helpView : searchField)
-    contentWidth: panel.fittedContentWidth(Style.space(520))
-    contentHeight: panel.fittedContentHeight(Style.space(610), Style.space(680))
+      : (root.panelMode === "help" ? helpView : addField)
+    contentWidth: panel.fittedContentWidth(Style.space(400))
+    contentHeight: panel.fittedContentHeight(root.taskContentHeight,
+      root.panelMode === "settings" ? Style.space(680) : Style.space(520))
 
     Item {
       id: taskKeyCatcher
@@ -825,10 +885,13 @@ Panel {
     }
 
     Column {
-      anchors.fill: parent
+      id: taskColumn
+      width: parent.width
+      height: root.taskContentHeight
       spacing: Style.space(10)
 
       Row {
+        id: headerRow
         width: parent.width
         spacing: Style.space(10)
 
@@ -852,7 +915,9 @@ Panel {
           }
 
           Text {
-            text: root.tasks.length + " open · " + root.dueCount + " due · " + root.sortMode
+            width: parent.width
+            elide: Text.ElideRight
+            text: root.openCount + " open · " + root.dueCount + " due · " + root.sortMode
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
@@ -904,6 +969,7 @@ Panel {
         accent: Color.accent
         font.family: root.fontFamily
         onTextChanged: root.searchText = text
+        onActiveFocusChanged: if (activeFocus) root.clearSelection()
         Keys.onPressed: function(event) {
           if (root.handleQuickTaskKey(event)) event.accepted = true
         }
@@ -912,11 +978,11 @@ Panel {
         Keys.onBacktabPressed: addField.forceActiveFocus()
       }
 
-      Row {
+      Flow {
+        id: filterRow
         visible: root.panelMode === "tasks"
         width: parent.width
-        height: Style.space(34)
-        spacing: Style.space(14)
+        spacing: Style.space(8)
 
         TextAction {
           id: filterAction
@@ -929,42 +995,17 @@ Panel {
         TextAction { id: allAction; iconText: "󰄬"; label: "All"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
         TextAction { id: dueAction; iconText: "󰃰"; label: "Due"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
 
-        Item {
-          width: Math.max(0, parent.width - filterAction.width - sortAction.width - allAction.width
-            - dueAction.width - lineMode.implicitWidth - parent.spacing * 5)
-          height: 1
-        }
+        TextAction { id: doneAction; label: "Done"; selected: root.filterKind === "completed"; onActivated: root.selectFilter(root.filterKind === "completed" ? "all" : "completed", "") }
 
-        Row {
-          id: lineMode
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(5)
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.twoLineDescriptions ? "Two lines" : "One line"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          ToggleSwitch {
-            anchors.verticalCenter: parent.verticalCenter
-            checked: root.twoLineDescriptions
-            trackHeight: Style.space(18)
-            foreground: root.foreground
-            accent: Color.accent
-            onToggled: root.toggleDescriptionLines()
-          }
-        }
       }
 
-      Rectangle { visible: root.panelMode === "tasks"; width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
+      Rectangle { id: taskDivider; visible: root.panelMode === "tasks"; width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
 
       Text {
+        id: matchingText
         visible: root.panelMode === "tasks"
         width: parent.width
-        text: root.visibleTasks.length + " matching / " + root.tasks.length + " open tasks"
+        text: root.visibleTasks.length + " matching / " + root.openCount + " open tasks · Right-click to toggle badge"
         color: root.dim
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -974,7 +1015,7 @@ Panel {
         id: taskArea
         visible: root.panelMode === "tasks"
         width: parent.width
-        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 279 : 233))
+        height: Style.space(42) * 5 + Style.space(2) * 4
 
         Rectangle {
           id: filterSidebar
@@ -1120,19 +1161,15 @@ Panel {
           required property int index
           required property var modelData
           readonly property bool selected: root.isSelected(modelData)
-          readonly property bool active: (taskKeyCatcher.activeFocus || searchField.activeFocus)
-            && index === root.activeTaskIndex
           readonly property bool editing: root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
           height: editing ? Math.max(Style.space(90), editField.implicitHeight + Style.space(12))
-            : Math.max(Style.space(root.twoLineDescriptions ? 80 : 48), taskDescription.implicitHeight + Style.space(12))
+            : Math.max(taskMetadata.visible ? Style.space(48) : Style.space(30),
+              (taskMetadata.visible ? taskDescription.implicitHeight : taskTitle.implicitHeight)
+                + Style.space(taskMetadata.visible ? 12 : 4))
           radius: Style.cornerRadius
-          color: selected
-            ? Style.selectedFillFor(root.foreground, Color.accent)
-            : (active
-              ? Style.hoverFillFor(root.foreground, Color.accent)
-              : (taskMouse.containsMouse ? Style.hoverFillFor(root.foreground, Color.accent) : "transparent"))
-          border.width: active ? 2 : 0
+          color: "transparent"
+          border.width: selected ? 2 : 0
           border.color: Color.accent
 
           MouseArea {
@@ -1168,27 +1205,19 @@ Panel {
                 anchors.centerIn: parent
                 text: "✓"
                 color: root.foreground
-                opacity: completeMouse.containsMouse ? 1 : 0
+                opacity: modelData.completed ? 1 : 0
                 font.pixelSize: Style.font.caption
-              }
-
-              MouseArea {
-                id: completeMouse
-                anchors.fill: parent
-                anchors.margins: -Style.space(6)
-                hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.completeTask(taskRow.modelData)
               }
             }
 
             Column {
               id: taskDescription
               anchors.verticalCenter: parent.verticalCenter
-              width: parent.width - completeBox.width - dueText.width - editButton.width - parent.spacing * 3
+              width: parent.width - completeBox.width - editButton.width - parent.spacing * 2
               spacing: 2
 
               Text {
+                id: taskTitle
                 width: parent.width
                 text: modelData.displayText
                 textFormat: Text.PlainText
@@ -1196,35 +1225,26 @@ Panel {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
                 font.bold: modelData.priority === "A"
-                wrapMode: root.twoLineDescriptions ? Text.WordWrap : Text.NoWrap
-                maximumLineCount: root.twoLineDescriptions ? 2 : 1
+                font.strikeout: modelData.completed
+                wrapMode: Text.WordWrap
+                maximumLineCount: 2
                 elide: Text.ElideRight
               }
 
               Text {
+                id: taskMetadata
                 width: parent.width
                 visible: modelData.priority !== "" || modelData.projects.length > 0 || modelData.contexts.length > 0 || modelData.metadata.length > 0
-                text: Todo.metadataHtml(modelData, root.dim, root.urgent)
+                text: Todo.metadataHtml(modelData, root.dim, root.urgent,
+                  modelData.isDue && !modelData.overdue ? root.urgent : root.dim)
                 textFormat: Text.StyledText
                 color: Color.accent
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
-                wrapMode: root.twoLineDescriptions ? Text.WordWrap : Text.NoWrap
-                maximumLineCount: root.twoLineDescriptions ? 2 : 1
+                wrapMode: Text.NoWrap
+                maximumLineCount: 1
                 elide: Text.ElideRight
               }
-            }
-
-            Text {
-              id: dueText
-              anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(80)
-              horizontalAlignment: Text.AlignRight
-              text: modelData.overdue ? "overdue" : modelData.due
-              textFormat: Text.PlainText
-              color: modelData.isDue ? root.urgent : root.dim
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
             }
 
             PanelActionButton {
@@ -1311,6 +1331,7 @@ Panel {
       }
 
       Text {
+        id: taskStatus
         visible: root.panelMode === "tasks" && root.statusMessage !== ""
         width: parent.width
         text: root.statusMessage
@@ -1330,37 +1351,10 @@ Panel {
         accent: Color.accent
         font.family: root.fontFamily
         onAccepted: root.addTask(text)
+        onActiveFocusChanged: if (activeFocus) root.clearSelection()
         Keys.onEscapePressed: root.close()
         Keys.onTabPressed: searchField.forceActiveFocus()
         Keys.onBacktabPressed: root.focusTaskList()
-      }
-
-      Row {
-        visible: root.panelMode === "tasks" && root.selectedCount > 0
-        width: parent.width
-        spacing: Style.space(8)
-
-        Button {
-          width: (parent.width - parent.spacing) / 2
-          text: "Complete (" + root.selectedCount + ")"
-          iconText: "✓"
-          bordered: true
-          foreground: root.foreground
-          accent: Color.accent
-          fontFamily: root.fontFamily
-          onClicked: root.completeSelected()
-        }
-
-        Button {
-          width: (parent.width - parent.spacing) / 2
-          text: "Delete (" + root.selectedCount + ")"
-          iconText: "󰆴"
-          bordered: true
-          foreground: root.urgent
-          accent: root.urgent
-          fontFamily: root.fontFamily
-          onClicked: root.deleteSelected()
-        }
       }
 
       FocusScope {
@@ -1392,7 +1386,7 @@ Panel {
                 ["gg", "first task"],
                 ["G", "last task"],
                 ["Ctrl+D / Ctrl+U", "page down / up"],
-                ["Tab / Shift+Tab", "search / list / add"]
+                ["Tab / Shift+Tab", "cycle search / list / add"]
               ]
             }
 
@@ -1400,8 +1394,9 @@ Panel {
               title: "EDITING"
               shortcuts: [
                 ["e / i", "edit active task"],
-                ["x", "complete task"],
-                ["Alt+X", "complete (search / list)"],
+                ["x", "complete or reopen task"],
+                ["p", "cycle priority"],
+                ["Alt+X", "complete or reopen (search / list)"],
                 ["dd", "delete selected or active"],
                 ["yy", "copy raw todo.txt line"],
                 ["Space", "toggle selection"]
@@ -1418,7 +1413,6 @@ Panel {
                 ["j / ↓ / Ctrl+N", "next sidebar filter"],
                 ["k / ↑ / Ctrl+P", "previous sidebar filter"],
                 ["Space", "toggle highlighted filter"],
-                ["D", "toggle density"],
                 ["S", "cycle sort mode"],
                 ["? / Esc", "help / back"]
               ]
@@ -1428,34 +1422,14 @@ Panel {
       }
 
       Column {
+        id: settingsColumn
         visible: root.panelMode === "settings"
         width: parent.width
+        height: root.settingsContentHeight
         spacing: Style.space(12)
 
         Text {
-          text: "Bar position"
-          color: root.foreground
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.subtitle
-        }
-
-        Row {
-          spacing: Style.space(16)
-          Repeater {
-            model: ["left", "center", "right"]
-            TextAction {
-              required property string modelData
-              label: modelData.charAt(0).toUpperCase() + modelData.slice(1)
-              onActivated: {
-                if (placementProcess.running) return
-                placementProcess.command = ["omarchy", "bar", "move", root.moduleName, "--section", modelData]
-                placementProcess.running = true
-              }
-            }
-          }
-        }
-
-        Text {
+          id: settingsTitle
           width: parent.width
           text: "Todo file"
           color: root.foreground
@@ -1465,6 +1439,7 @@ Panel {
         }
 
         Text {
+          id: settingsDescription
           width: parent.width
           text: "Choose the absolute path to your todo.txt file. The archive will use done.txt in the same folder."
           color: root.dim
@@ -1485,6 +1460,7 @@ Panel {
         }
 
         Text {
+          id: settingsStatus
           visible: root.statusMessage !== ""
           width: parent.width
           text: root.statusMessage
@@ -1496,7 +1472,9 @@ Panel {
         }
 
         Row {
+          id: settingsActions
           width: parent.width
+          height: Style.space(40)
           spacing: Style.space(8)
 
           Button {

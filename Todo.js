@@ -1,6 +1,8 @@
 function parseLine(raw) {
   var text = String(raw).replace(/\r$/, "")
   var body = text.trim()
+  var completed = /^x\s/.test(body)
+  if (completed) body = body.replace(/^x\s+/, "").replace(/^\d{4}-\d{2}-\d{2}(?:\s+|$)/, "")
   var priority = /^\([A-Z]\)(?:\s|$)/.test(body) ? body.slice(1, 2) : ""
   if (priority) body = body.slice(3).trim()
   body = body.replace(/^\d{4}-\d{2}-\d{2}(?:\s+|$)/, "")
@@ -16,7 +18,7 @@ function parseLine(raw) {
       if (/^due:\d{4}-\d{2}-\d{2}$/.test(word)) due = word.slice(4)
     } else title.push(word)
   })
-  return { rawText: text, text: text.trim(), displayText: title.join(" "),
+  return { completed: completed, rawText: text, text: text.trim(), displayText: title.join(" "),
     priority: priority, projects: projects, contexts: contexts, metadata: metadata, due: due }
 }
 
@@ -25,15 +27,20 @@ function escapeHtml(value) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 }
 
-function metadataHtml(task, color, contextColor) {
+function metadataHtml(task, color, contextColor, dueColor) {
   var tags = (task.priority ? ["(" + task.priority + ")"] : [])
     .concat(task.projects.map(function(v) { return "+" + v }))
   var groups = []
   if (tags.length) groups.push(escapeHtml(tags.join("  ")))
   if (task.contexts.length) groups.push('<font color="' + escapeHtml(contextColor) + '">'
     + escapeHtml(task.contexts.map(function(v) { return "@" + v }).join("  ")) + '</font>')
-  if (task.metadata.length) groups.push('<font color="' + escapeHtml(color) + '">'
-    + escapeHtml(task.metadata.join("  ")) + '</font>')
+  if (task.metadata.length) {
+    var metadata = task.metadata.map(function(value) {
+      var metadataColor = /^due:\d{4}-\d{2}-\d{2}$/.test(value) ? (dueColor || color) : color
+      return '<font color="' + escapeHtml(metadataColor) + '">' + escapeHtml(value) + '</font>'
+    })
+    groups.push(metadata.join("  "))
+  }
   return groups.join("  ")
 }
 

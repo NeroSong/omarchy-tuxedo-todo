@@ -65,7 +65,7 @@ test('search shortcuts navigate and complete without changing focus or query', (
     searchField: { activeFocus: true, text: 'invoice' },
     taskKeyCatcher: { activeFocus: false }, activeTask: { lineNumber: 7 },
     clearPrefix() {}, moveActiveTask(delta) { calls.push(delta); },
-    completeTask(task) { calls.push(task.lineNumber); }
+    toggleCompletion() { calls.push(context.activeTask.lineNumber); }
   });
   vm.runInContext(source, context);
   assert.equal(context.handleQuickTaskKey({ key: 78, modifiers: 1 }), true);
@@ -82,4 +82,16 @@ test('search shortcuts navigate and complete without changing focus or query', (
   context.searchField.activeFocus = false;
   assert.equal(context.handleQuickTaskKey({ key: 88, modifiers: 2 }), false);
   assert.deepEqual(calls, [1, -1, 7]);
+});
+
+test('completed lines preserve raw text and strip completion and creation dates from titles', () => {
+  const raw = 'x 2026-09-11 (A) 2026-09-01 Ship update +app @home due:2026-09-10';
+  const task = todo.parseLine(raw);
+  assert.equal(task.completed, true);
+  assert.equal(task.rawText, raw);
+  assert.equal(task.displayText, 'Ship update');
+  assert.equal(task.priority, 'A');
+  assert.equal(task.projects[0], 'app');
+  assert.equal(todo.parseLine('x Ship update').displayText, 'Ship update');
+  assert.equal(todo.parseLine('xylophone practice').completed, false);
 });
