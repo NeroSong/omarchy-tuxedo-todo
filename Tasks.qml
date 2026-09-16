@@ -37,6 +37,7 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   property var tasks: []
+  property var completedTasks: []
   property var projects: []
   property var contexts: []
   readonly property var projectCounts: Todo.counts(tasks, "projects")
@@ -65,7 +66,11 @@ Panel {
   property bool todoWatcherWanted: false
   property bool stateWatcherWanted: false
   property bool todoWatcherRestartImmediate: false
+  property bool doneReadPending: false
+  property bool doneWatcherWanted: false
+  property bool doneWatcherRestartImmediate: false
   property string todoReadPath: ""
+  property string doneReadPath: ""
   property string stateWritePayload: ""
   readonly property int dueCount: tasks.filter(function(task) { return task.isDue }).length
   readonly property int badgeCount: badgeDueOnly ? dueCount : tasks.length
@@ -80,8 +85,13 @@ Panel {
   readonly property var visibleTasks: {
     var revision = dataRevision
     var result = []
-    for (var i = 0; i < tasks.length; i++) {
-      var task = tasks[i]
+    var scope = Todo.searchScope(searchText)
+    var candidates = scope === "done" ? completedTasks
+      : (scope === "all" ? tasks.concat(completedTasks) : tasks)
+    for (var i = 0; i < candidates.length; i++) {
+      var task = candidates[i]
+      if (scope === "due" && !task.isDue) continue
+      if (scope === "rec" && !Todo.isRecurring(task)) continue
       if (filterKind === "project" && task.projects.indexOf(filterValue) < 0) continue
       if (filterKind === "context" && task.contexts.indexOf(filterValue) < 0) continue
       if (filterKind === "due" && !task.isDue) continue
@@ -126,6 +136,8 @@ Panel {
       task.projects.forEach(function(value) { projectSet[value] = true })
       task.contexts.forEach(function(value) { contextSet[value] = true })
       task.lineNumber = i + 1
+      task.completed = false
+      task.completedDate = ""
       task.isDue = task.due !== "" && task.due <= today
       task.overdue = task.due !== "" && task.due < today
       nextTasks.push(task)
@@ -140,6 +152,22 @@ Panel {
     dataRevision++
     clampActiveTask()
     if (wasEditing) Qt.callLater(function() { taskKeyCatcher.forceActiveFocus() })
+  }
+
+  function parseDone(raw) {
+    var nextTasks = []
+    var lines = String(raw || "").split("\n")
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].trim() === "") continue
+      var task = Todo.parseCompletedLine(lines[i])
+      task.lineNumber = i + 1
+      task.isDue = false
+      task.overdue = false
+      nextTasks.push(task)
+    }
+    completedTasks = nextTasks
+    dataRevision++
+    clampActiveTask()
   }
 
   function navigationDelta(event) {
@@ -229,7 +257,7 @@ Panel {
   function deleteActiveOrSelected() {
     if (actionProcess.running) return
     var numbers = selectedCount > 0 ? selectedTaskNumbers(true)
-      : (activeTask ? [activeTask.lineNumber] : [])
+      : (activeTask && !activeTask.completed ? [activeTask.lineNumber] : [])
     if (numbers.length === 0) return
     statusMessage = "Deleting " + numbers.length + " task(s)…"
     actionProcess.command = tuxedoCommand(["del"].concat(numbers.map(String)).concat(["-f"]))
@@ -325,7 +353,7 @@ Panel {
   }
 
   function completeTask(task) {
-    if (!task || actionProcess.running) return
+    if (!task || task.completed || actionProcess.running) return
     statusMessage = "Completing…"
     actionProcess.command = tuxedoCommand(["do", String(task.lineNumber)])
     actionProcess.running = true
@@ -333,11 +361,11 @@ Panel {
 
   function isSelected(task) {
     var revision = selectionRevision
-    return !!task && selectedLines[String(task.lineNumber)] === task.text
+    return !!task && !task.completed && selectedLines[String(task.lineNumber)] === task.text
   }
 
   function toggleSelected(task) {
-    if (!task || editingLineNumber !== 0) return
+    if (!task || task.completed || editingLineNumber !== 0) return
     var next = {}
     for (var key in selectedLines) next[key] = selectedLines[key]
     var lineKey = String(task.lineNumber)
@@ -374,7 +402,7 @@ Panel {
   }
 
   function startEditing(task) {
-    if (!task || actionProcess.running) return
+    if (!task || task.completed || actionProcess.running) return
     selectedLines = ({})
     selectionRevision++
     editingLineNumber = task.lineNumber
@@ -474,6 +502,18 @@ Panel {
     todoReadProcess.running = true
   }
 
+  function requestDoneRead() {
+    if (!ioReady || helperPath === "") return
+    if (doneReadProcess.running) {
+      doneReadPending = true
+      return
+    }
+    doneReadPending = false
+    doneReadPath = donePath()
+    doneReadProcess.command = ["python3", helperPath, "read-done", doneReadPath]
+    doneReadProcess.running = true
+  }
+
   function requestStateRead() {
     if (helperPath === "") {
       statusMessage = "Could not resolve the bundled file helper"
@@ -520,6 +560,19 @@ Panel {
     } else {
       todoWatchProcess.command = ["python3", helperPath, "watch", todoPath]
       todoWatchProcess.running = true
+    }
+  }
+
+  function restartDoneWatcher() {
+    if (!ioReady || helperPath === "") return
+    doneWatcherWanted = true
+    doneWatchRestart.stop()
+    if (doneWatchProcess.running) {
+      doneWatcherRestartImmediate = true
+      doneWatchProcess.signal(15)
+    } else {
+      doneWatchProcess.command = ["python3", helperPath, "watch", donePath()]
+      doneWatchProcess.running = true
     }
   }
 
@@ -573,7 +626,9 @@ Panel {
     statusMessage = ""
     panelMode = "tasks"
     restartTodoWatcher()
+    restartDoneWatcher()
     requestTodoRead()
+    requestDoneRead()
   }
 
   onOpenedChanged: {
@@ -587,6 +642,7 @@ Panel {
       return
     }
     requestTodoRead()
+    requestDoneRead()
     statusMessage = ""
     Qt.callLater(function() { searchField.forceActiveFocus() })
   }
@@ -630,6 +686,26 @@ Panel {
   }
 
   Process {
+    id: doneReadProcess
+    running: false
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        var reply = root.parseHelperReply(text, root.todoOutputLimit, "done")
+        if (reply && root.doneReadPath === root.donePath()) {
+          root.parseDone(String(reply.data || ""))
+        } else if (!reply && root.doneReadPath === root.donePath()) {
+          root.completedTasks = []
+          root.dataRevision++
+        }
+      }
+    }
+    onExited: {
+      if (root.doneReadPending || root.doneReadPath !== root.donePath()) root.requestDoneRead()
+    }
+  }
+
+  Process {
     id: stateReadProcess
     running: false
     stdout: StdioCollector {
@@ -641,11 +717,15 @@ Panel {
         if (!root.ioReady) {
           root.ioReady = true
           root.restartTodoWatcher()
+          root.restartDoneWatcher()
           root.startStateWatcher()
           root.requestTodoRead()
+          root.requestDoneRead()
         } else if (root.todoPath !== previousTodoPath) {
           root.restartTodoWatcher()
+          root.restartDoneWatcher()
           root.requestTodoRead()
+          root.requestDoneRead()
         }
       }
     }
@@ -705,7 +785,33 @@ Panel {
     onExited: if (root.stateWatcherWanted) stateWatchRestart.start()
   }
 
+  Process {
+    id: doneWatchProcess
+    running: false
+    stdout: SplitParser {
+      onRead: function(line) {
+        var value = String(line || "").trim()
+        if (value === "EVENT") doneReadDebounce.restart()
+        else if (value === "READY") {}
+        else if (value !== "") {
+          var reply = root.parseHelperReply(value, 512, "done")
+        }
+      }
+    }
+    onExited: {
+      if (!root.doneWatcherWanted) return
+      if (root.doneWatcherRestartImmediate) {
+        root.doneWatcherRestartImmediate = false
+        doneWatchProcess.command = ["python3", root.helperPath, "watch", root.donePath()]
+        doneWatchProcess.running = true
+      } else {
+        doneWatchRestart.start()
+      }
+    }
+  }
+
   Timer { id: todoReadDebounce; interval: 80; repeat: false; onTriggered: root.requestTodoRead() }
+  Timer { id: doneReadDebounce; interval: 80; repeat: false; onTriggered: root.requestDoneRead() }
   Timer { id: stateReadDebounce; interval: 80; repeat: false; onTriggered: root.requestStateRead() }
   Timer {
     id: todoWatchRestart
@@ -725,6 +831,15 @@ Panel {
       stateWatchProcess.running = true
     }
   }
+  Timer {
+    id: doneWatchRestart
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      doneWatchProcess.command = ["python3", root.helperPath, "watch", root.donePath()]
+      doneWatchProcess.running = true
+    }
+  }
 
   Process {
     id: actionProcess
@@ -741,6 +856,7 @@ Panel {
         root.statusMessage = "The action could not be completed"
       }
       root.requestTodoRead()
+      root.requestDoneRead()
     }
   }
 
@@ -898,7 +1014,7 @@ Panel {
         id: searchField
         visible: root.panelMode === "tasks"
         width: parent.width
-        placeholderText: "Search tasks"
+        placeholderText: "Search tasks — try in:done"
         foreground: root.foreground
         accent: Color.accent
         font.family: root.fontFamily
@@ -1121,7 +1237,7 @@ Panel {
           readonly property bool selected: root.isSelected(modelData)
           readonly property bool active: (taskKeyCatcher.activeFocus || searchField.activeFocus)
             && index === root.activeTaskIndex
-          readonly property bool editing: root.editingLineNumber === modelData.lineNumber
+          readonly property bool editing: !modelData.completed && root.editingLineNumber === modelData.lineNumber
           width: ListView.view.width
           height: editing ? Math.max(Style.space(90), editField.implicitHeight + Style.space(12))
             : Math.max(Style.space(root.twoLineDescriptions ? 80 : 48), taskDescription.implicitHeight + Style.space(12))
@@ -1142,7 +1258,7 @@ Panel {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
               root.activeTaskIndex = index
-              root.toggleSelected(taskRow.modelData)
+              if (!taskRow.modelData.completed) root.toggleSelected(taskRow.modelData)
             }
           }
 
@@ -1167,7 +1283,7 @@ Panel {
                 anchors.centerIn: parent
                 text: "✓"
                 color: root.foreground
-                opacity: completeMouse.containsMouse ? 1 : 0
+                opacity: modelData.completed || completeMouse.containsMouse ? 1 : 0
                 font.pixelSize: Style.font.caption
               }
 
@@ -1175,8 +1291,9 @@ Panel {
                 id: completeMouse
                 anchors.fill: parent
                 anchors.margins: -Style.space(6)
+                enabled: !modelData.completed
                 hoverEnabled: true
-                cursorShape: Qt.PointingHandCursor
+                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: root.completeTask(taskRow.modelData)
               }
             }
@@ -1228,6 +1345,7 @@ Panel {
 
             PanelActionButton {
               id: editButton
+              visible: !modelData.completed
               anchors.verticalCenter: parent.verticalCenter
               iconText: "✎"
               tooltipText: "Edit task"
@@ -1414,6 +1532,7 @@ Panel {
                 ["Ctrl+A", "All (clear filter)"],
                 ["/ / Ctrl+K", "focus search"],
                 ["Ctrl+N / Ctrl+P", "navigate while searching"],
+                ["in:open/all/done/due/rec", "search scope"],
                 ["j / ↓ / Ctrl+N", "next sidebar filter"],
                 ["k / ↑ / Ctrl+P", "previous sidebar filter"],
                 ["Space", "toggle highlighted filter"],

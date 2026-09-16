@@ -85,7 +85,15 @@ def secure_read(path: str, max_bytes: int, *, missing_ok: bool = False) -> bytes
 
 
 def read_todo(path: str) -> bytes:
-    data = secure_read(path, TODO_MAX_BYTES)
+    return read_task_file(path)
+
+
+def read_done(path: str) -> bytes:
+    return read_task_file(path, missing_ok=True)
+
+
+def read_task_file(path: str, *, missing_ok: bool = False) -> bytes:
+    data = secure_read(path, TODO_MAX_BYTES, missing_ok=missing_ok)
     line_bytes = 0
     for byte in data:
         if byte == 10:
@@ -276,13 +284,15 @@ def watch(path: str) -> None:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 3 or argv[1] not in ("read-todo", "read-state", "write-state", "watch"):
+    if len(argv) != 3 or argv[1] not in ("read-todo", "read-done", "read-state", "write-state", "watch"):
         _emit({"ok": False, "error": "USAGE"})
         return 2
     command, path = argv[1], argv[2]
     try:
         if command == "read-todo":
             _emit({"ok": True, "data": _decode_utf8(read_todo(path))})
+        elif command == "read-done":
+            _emit({"ok": True, "data": _decode_utf8(read_done(path))})
         elif command == "read-state":
             _emit({"ok": True, "data": _decode_utf8(read_state(path))})
         elif command == "write-state":

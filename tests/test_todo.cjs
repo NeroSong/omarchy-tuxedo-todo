@@ -19,6 +19,21 @@ test('recognizes leading tags and metadata, keeps URLs and ordinary punctuation'
   assert.equal(todo.parseLine('+cubo custom:yes @work Read https://example.org Note: today').displayText,
     'Read https://example.org Note: today');
   assert.equal(todo.parseLine('custom:yes +cubo @work').displayText, '');
+  const quoted = todo.parseLine('Read book +books author:"Brandon Sanderson" details:"a:b value"');
+  assert.equal(quoted.displayText, 'Read book');
+  assert.equal(quoted.metadata.join('|'), 'author:"Brandon Sanderson"|details:"a:b value"');
+});
+
+test('parses archived tasks without completion bookkeeping in the title', () => {
+  const task = todo.parseCompletedLine(
+    'x 2025-12-31 2025-01-01 Ler livro: Skyward +livros @lido autor:"Brandon Sanderson"');
+  assert.equal(task.displayText, 'Ler livro: Skyward');
+  assert.equal(task.completed, true);
+  assert.equal(task.completedDate, '2025-12-31');
+  assert.equal(task.projects.join(' '), 'livros');
+  assert.equal(task.contexts.join(' '), 'lido');
+  assert.equal(todo.matchesSearch(task, 'brandon @lido'), true);
+  assert.equal(todo.matchesSearch(task, 'skyw @lido'), true);
 });
 
 test('counts each task once per tag, including object prototype names', () => {
@@ -40,13 +55,25 @@ test('fuzzy search matches text, projects and contexts with AND semantics', () =
   assert.equal(todo.matchesSearch(task, ''), true);
 });
 
-test('plain search terms only match task title, not structured metadata', () => {
+test('plain search terms match the complete task including metadata', () => {
   const task = todo.parseLine('Prepare invoice +EditoraCubo @DeepWork custom:quarterly');
-  assert.equal(todo.matchesSearch(task, 'EditoraCubo'), false);
-  assert.equal(todo.matchesSearch(task, 'DeepWork'), false);
-  assert.equal(todo.matchesSearch(task, 'quarterly'), false);
+  assert.equal(todo.matchesSearch(task, 'EditoraCubo'), true);
+  assert.equal(todo.matchesSearch(task, 'DeepWork'), true);
+  assert.equal(todo.matchesSearch(task, 'quarterly'), true);
   assert.equal(todo.matchesSearch(task, '+EditoraCubo'), true);
   assert.equal(todo.matchesSearch(task, '@DeepWork'), true);
+  assert.equal(todo.matchesSearch(todo.parseLine('Blood of Dragons author:"Robin Hobb"'), 'brandon'), false);
+});
+
+test('search scopes are ignored as terms and the last recognized scope wins', () => {
+  const task = todo.parseLine('Pay invoice +finance rec:1m');
+  assert.equal(todo.matchesSearch(task, 'invoice in:done'), true);
+  assert.equal(todo.searchScope('invoice'), 'open');
+  assert.equal(todo.searchScope('invoice in:all'), 'all');
+  assert.equal(todo.searchScope('in:done invoice in:rec'), 'rec');
+  assert.equal(todo.searchScope('invoice in:unknown'), 'open');
+  assert.equal(todo.isRecurring(task), true);
+  assert.equal(todo.isRecurring(todo.parseLine('Pay invoice +finance')), false);
 });
 
 test('escapes task-supplied markup before rendering colored metadata', () => {

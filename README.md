@@ -43,6 +43,7 @@ Interactive installation offers a left/center/right position selector (unless `-
 Click the checklist icon in the bar to open the panel.
 
 - Type in **Search tasks** to fuzzy-find title words, projects (`+project`), and contexts (`@context`). Multiple terms can appear in any order and all must match.
+- Searches show open tasks by default. Add `in:all`, `in:done`, `in:due`, `in:rec`, or `in:open` to choose a scope. Archived matches from `done.txt` have a checked checkbox and are read-only.
 - Use **Filter** to select a discovered project or context, or choose **Due** to show tasks due today or earlier.
 - Click **Sort** to cycle through due-date, file-order, and priority sorting.
 - Enter text in **Add a task** and press Enter to create a task.

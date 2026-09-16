@@ -36,6 +36,15 @@ class SecureFilesTests(unittest.TestCase):
         path.write_bytes(content)
         self.assertEqual(content, secure_files.read_todo(str(path)))
 
+    def test_missing_done_file_is_an_empty_archive(self):
+        self.assertEqual(b"", secure_files.read_done(str(self.root / "done.txt")))
+
+    def test_done_file_uses_todo_file_validation(self):
+        path = self.root / "done.txt"
+        content = b"x 2026-09-16 Finished task\n"
+        path.write_bytes(content)
+        self.assertEqual(content, secure_files.read_done(str(path)))
+
     def test_todo_rejects_symlink(self):
         target = self.root / "target"
         target.write_text("task")
