@@ -45,6 +45,7 @@ Panel {
   property string filterKind: "all"
   property string filterValue: ""
   property string searchText: ""
+  readonly property string activeSearchScope: Todo.searchScope(searchText)
   property int dataRevision: 0
   property string statusMessage: ""
   property string todoPath: defaultTodoPath
@@ -187,6 +188,11 @@ Panel {
     filterValue = value || ""
     taskList.positionViewAtBeginning()
     clampActiveTask()
+  }
+
+  function selectSearchScope(scope) {
+    searchField.text = Todo.withSearchScope(searchField.text, scope)
+    searchField.forceActiveFocus()
   }
 
   function clampActiveTask() {
@@ -1041,12 +1047,10 @@ Panel {
           onActivated: root.filterSidebarOpen = !root.filterSidebarOpen
         }
         TextAction { id: sortAction; iconText: "󰒺"; label: "Sort"; onActivated: root.cycleSortMode() }
-        TextAction { id: allAction; iconText: "󰄬"; label: "All"; selected: root.filterKind === "all"; onActivated: root.selectFilter("all", "") }
-        TextAction { id: dueAction; iconText: "󰃰"; label: "Due"; selected: root.filterKind === "due"; onActivated: root.selectFilter("due", "") }
 
         Item {
-          width: Math.max(0, parent.width - filterAction.width - sortAction.width - allAction.width
-            - dueAction.width - lineMode.implicitWidth - parent.spacing * 5)
+          width: Math.max(0, parent.width - filterAction.width - sortAction.width
+            - lineMode.implicitWidth - parent.spacing * 3)
           height: 1
         }
 
@@ -1073,23 +1077,47 @@ Panel {
           }
         }
       }
+      Row {
+        id: scopeRow
+        visible: root.panelMode === "tasks"
+        width: parent.width
+        height: Style.space(28)
+        spacing: Style.space(16)
+
+        Repeater {
+          model: [
+            { scope: "open", label: "Open" },
+            { scope: "all", label: "All" },
+            { scope: "due", label: "Due" },
+            { scope: "rec", label: "Rec" },
+            { scope: "done", label: "Done" }
+          ]
+          TextAction {
+            required property var modelData
+            label: modelData.label
+            selected: root.activeSearchScope === modelData.scope
+            onActivated: root.selectSearchScope(modelData.scope)
+          }
+        }
+      }
 
       Rectangle { visible: root.panelMode === "tasks"; width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
 
       Text {
         visible: root.panelMode === "tasks"
         width: parent.width
-        text: root.visibleTasks.length + " matching / " + root.tasks.length + " open tasks"
-        color: root.dim
+        text: root.visibleTasks.length + " matching"
+        color: Color.accent
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
+        font.bold: true
       }
 
       Item {
         id: taskArea
         visible: root.panelMode === "tasks"
         width: parent.width
-        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 279 : 233))
+        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 317 : 271))
 
         Rectangle {
           id: filterSidebar
@@ -1529,7 +1557,7 @@ Panel {
               title: "VIEW & FILTERS"
               shortcuts: [
                 ["fp / fc", "project / context filters"],
-                ["Ctrl+A", "All (clear filter)"],
+                ["Ctrl+A", "clear project/context filter"],
                 ["/ / Ctrl+K", "focus search"],
                 ["Ctrl+N / Ctrl+P", "navigate while searching"],
                 ["in:open/all/done/due/rec", "search scope"],

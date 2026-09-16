@@ -74,6 +74,9 @@ test('search scopes are ignored as terms and the last recognized scope wins', ()
   assert.equal(todo.searchScope('invoice in:unknown'), 'open');
   assert.equal(todo.isRecurring(task), true);
   assert.equal(todo.isRecurring(todo.parseLine('Pay invoice +finance')), false);
+  assert.equal(todo.withSearchScope('brandon @lido in:all', 'done'), 'brandon @lido in:done');
+  assert.equal(todo.withSearchScope('in:due invoice in:rec', 'open'), 'invoice');
+  assert.equal(todo.withSearchScope('invoice', 'all'), 'invoice in:all');
 });
 
 test('escapes task-supplied markup before rendering colored metadata', () => {

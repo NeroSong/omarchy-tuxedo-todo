@@ -95,6 +95,15 @@ function searchScope(query) {
   return scope
 }
 
+function withSearchScope(query, scope) {
+  var value = ["open", "all", "done", "due", "rec"].indexOf(scope) >= 0 ? scope : "open"
+  var tokens = String(query || "").trim().split(/\s+/).filter(function(token) {
+    return token !== "" && !/^in:(?:open|all|done|due|rec)$/i.test(token)
+  })
+  if (value !== "open") tokens.push("in:" + value)
+  return tokens.join(" ")
+}
+
 function isRecurring(task) {
   return task.metadata.some(function(value) { return /^rec:/i.test(value) })
 }
