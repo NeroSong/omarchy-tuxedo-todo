@@ -44,3 +44,29 @@ function counts(tasks, field) {
   })
   return result
 }
+
+function fuzzyMatch(value, query) {
+  var haystack = String(value).toLowerCase()
+  var needle = String(query).toLowerCase()
+  var needleIndex = 0
+  for (var i = 0; i < haystack.length && needleIndex < needle.length; i++) {
+    if (haystack[i] === needle[needleIndex]) needleIndex++
+  }
+  return needleIndex === needle.length
+}
+
+function matchesSearch(task, query) {
+  var tokens = String(query || "").trim().split(/\s+/).filter(function(token) { return token !== "" })
+  return tokens.every(function(token) {
+    var values = [task.displayText]
+    var needle = token
+    if (token.length > 1 && token[0] === "+") {
+      values = task.projects
+      needle = token.slice(1)
+    } else if (token.length > 1 && token[0] === "@") {
+      values = task.contexts
+      needle = token.slice(1)
+    }
+    return values.some(function(value) { return fuzzyMatch(value, needle) })
+  })
+}

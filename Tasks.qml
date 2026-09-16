@@ -80,13 +80,12 @@ Panel {
   readonly property var visibleTasks: {
     var revision = dataRevision
     var result = []
-    var needle = searchText.trim().toLowerCase()
     for (var i = 0; i < tasks.length; i++) {
       var task = tasks[i]
       if (filterKind === "project" && task.projects.indexOf(filterValue) < 0) continue
       if (filterKind === "context" && task.contexts.indexOf(filterValue) < 0) continue
       if (filterKind === "due" && !task.isDue) continue
-      if (needle !== "" && task.text.toLowerCase().indexOf(needle) < 0) continue
+      if (!Todo.matchesSearch(task, searchText)) continue
       result.push(task)
     }
     result.sort(function(a, b) {

@@ -30,6 +30,25 @@ test('counts each task once per tag, including object prototype names', () => {
   assert.equal(todo.counts(tasks, 'contexts').work, 2);
 });
 
+test('fuzzy search matches text, projects and contexts with AND semantics', () => {
+  const task = todo.parseLine('Prepare quarterly invoice +EditoraCubo @DeepWork due:2026-09-30');
+  assert.equal(todo.matchesSearch(task, 'prep invc'), true);
+  assert.equal(todo.matchesSearch(task, '+cubo @dwork'), true);
+  assert.equal(todo.matchesSearch(task, 'invc +edcbo @deep'), true);
+  assert.equal(todo.matchesSearch(task, 'invoice +other'), false);
+  assert.equal(todo.matchesSearch(task, '@office'), false);
+  assert.equal(todo.matchesSearch(task, ''), true);
+});
+
+test('plain search terms only match task title, not structured metadata', () => {
+  const task = todo.parseLine('Prepare invoice +EditoraCubo @DeepWork custom:quarterly');
+  assert.equal(todo.matchesSearch(task, 'EditoraCubo'), false);
+  assert.equal(todo.matchesSearch(task, 'DeepWork'), false);
+  assert.equal(todo.matchesSearch(task, 'quarterly'), false);
+  assert.equal(todo.matchesSearch(task, '+EditoraCubo'), true);
+  assert.equal(todo.matchesSearch(task, '@DeepWork'), true);
+});
+
 test('escapes task-supplied markup before rendering colored metadata', () => {
   const html = todo.metadataHtml(todo.parseLine('Title +<img> @a&b custom:<b>'), '#888888', '#aa5555');
   assert.ok(html.includes('+&lt;img&gt;'));
