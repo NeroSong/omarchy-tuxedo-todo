@@ -53,6 +53,7 @@ Panel {
   property bool badgeDueOnly: false
   property bool twoLineDescriptions: false
   property bool filterSidebarOpen: false
+  property bool sidebarPreviewActive: false
   property string sortMode: "sort:due"
   property string panelMode: "tasks"
   property var selectedLines: ({})
@@ -81,6 +82,13 @@ Panel {
     return Object.keys(selectedLines).length
   }
   readonly property int sidebarEntryCount: projects.length + contexts.length
+  readonly property string previewFilterKind: sidebarCursor < projects.length ? "project" : "context"
+  readonly property string previewFilterValue: sidebarCursor < projects.length
+    ? (projects[sidebarCursor] || "") : (contexts[sidebarCursor - projects.length] || "")
+  readonly property string effectiveFilterKind: sidebarPreviewActive && filterSidebarOpen
+    && sidebarEntryCount > 0 ? previewFilterKind : filterKind
+  readonly property string effectiveFilterValue: sidebarPreviewActive && filterSidebarOpen
+    && sidebarEntryCount > 0 ? previewFilterValue : filterValue
   readonly property var activeTask: visibleTasks.length > 0 && activeTaskIndex >= 0
     ? visibleTasks[Math.min(activeTaskIndex, visibleTasks.length - 1)] : null
 
@@ -94,9 +102,9 @@ Panel {
       var task = candidates[i]
       if (scope === "due" && !task.isDue) continue
       if (scope === "rec" && !Todo.isRecurring(task)) continue
-      if (filterKind === "project" && task.projects.indexOf(filterValue) < 0) continue
-      if (filterKind === "context" && task.contexts.indexOf(filterValue) < 0) continue
-      if (filterKind === "due" && !task.isDue) continue
+      if (effectiveFilterKind === "project" && task.projects.indexOf(effectiveFilterValue) < 0) continue
+      if (effectiveFilterKind === "context" && task.contexts.indexOf(effectiveFilterValue) < 0) continue
+      if (effectiveFilterKind === "due" && !task.isDue) continue
       if (!Todo.matchesSearch(task, searchText)) continue
       result.push(task)
     }
@@ -229,6 +237,7 @@ Panel {
   function focusTaskList() {
     clearPrefix()
     panelMode = "tasks"
+    sidebarPreviewActive = false
     filterSidebarOpen = false
     Qt.callLater(function() { taskKeyCatcher.forceActiveFocus() })
   }
@@ -238,15 +247,38 @@ Panel {
     filterSidebarOpen = true
     sidebarCursor = kind === "context" ? projects.length : 0
     if (sidebarEntryCount > 0) sidebarCursor = Math.min(sidebarCursor, sidebarEntryCount - 1)
+    sidebarPreviewActive = sidebarEntryCount > 0
+    taskList.positionViewAtBeginning()
+    clampActiveTask()
     Qt.callLater(function() { filterSidebar.forceActiveFocus() })
+  }
+
+  function toggleSidebar() {
+    if (filterSidebarOpen) {
+      sidebarPreviewActive = false
+      filterSidebarOpen = false
+    } else openSidebar(filterKind === "context" ? "context" : "project")
+  }
+
+  function moveSidebarCursor(delta) {
+    if (sidebarEntryCount === 0) return
+    sidebarCursor = Math.max(0, Math.min(sidebarCursor + delta, sidebarEntryCount - 1))
+    sidebarPreviewActive = true
+    taskList.positionViewAtBeginning()
+    clampActiveTask()
+  }
+
+  function applySidebarFilter(kind, value) {
+    sidebarPreviewActive = false
+    if (filterKind === kind && filterValue === value) selectFilter("all", "")
+    else selectFilter(kind, value)
   }
 
   function activateSidebarCursor() {
     if (sidebarEntryCount === 0) return
     var kind = sidebarCursor < projects.length ? "project" : "context"
     var value = kind === "project" ? projects[sidebarCursor] : contexts[sidebarCursor - projects.length]
-    if (filterKind === kind && filterValue === value) selectFilter("all", "")
-    else selectFilter(kind, value)
+    applySidebarFilter(kind, value)
   }
 
   function positionSidebarCursor() {
@@ -444,9 +476,9 @@ Panel {
   }
 
   function filterLabel() {
-    if (filterKind === "project") return "+" + filterValue
-    if (filterKind === "context") return "@" + filterValue
-    if (filterKind === "due") return "Due"
+    if (effectiveFilterKind === "project") return "+" + effectiveFilterValue
+    if (effectiveFilterKind === "context") return "@" + effectiveFilterValue
+    if (effectiveFilterKind === "due") return "Due"
     return "All"
   }
 
@@ -1096,7 +1128,7 @@ Panel {
           iconText: "󰈲"
           label: "Filter"
           selected: root.filterSidebarOpen || root.filterKind === "project" || root.filterKind === "context"
-          onActivated: root.filterSidebarOpen = !root.filterSidebarOpen
+          onActivated: root.toggleSidebar()
         }
         TextAction { id: sortAction; iconText: "󰒺"; label: "Sort"; onActivated: root.cycleSortMode() }
       }
@@ -1139,8 +1171,7 @@ Panel {
               root.focusTaskList()
               event.accepted = true
             } else if (root.navigationDelta(event) !== 0) {
-              if (root.sidebarEntryCount > 0) root.sidebarCursor = Math.max(0,
-                Math.min(root.sidebarCursor + root.navigationDelta(event), root.sidebarEntryCount - 1))
+              root.moveSidebarCursor(root.navigationDelta(event))
               event.accepted = true
             } else if (event.key === Qt.Key_Space) {
               root.activateSidebarCursor()
@@ -1172,7 +1203,10 @@ Panel {
                 tooltipText: "Close filters"
                 foreground: root.dim
                 hoverColor: root.foreground
-                onClicked: root.filterSidebarOpen = false
+                onClicked: {
+                  root.sidebarPreviewActive = false
+                  root.filterSidebarOpen = false
+                }
               }
             }
 
@@ -1211,7 +1245,7 @@ Panel {
                     leftAlign: true
                     selected: root.filterKind === "project" && root.filterValue === modelData
                     cursorHighlighted: filterSidebar.activeFocus && root.sidebarCursor === index
-                    onActivated: root.selectFilter("project", modelData)
+                    onActivated: root.applySidebarFilter("project", modelData)
                   }
                 }
 
@@ -1237,7 +1271,7 @@ Panel {
                     leftAlign: true
                     selected: root.filterKind === "context" && root.filterValue === modelData
                     cursorHighlighted: filterSidebar.activeFocus && root.sidebarCursor === root.projects.length + index
-                    onActivated: root.selectFilter("context", modelData)
+                    onActivated: root.applySidebarFilter("context", modelData)
                   }
                 }
               }

@@ -87,7 +87,7 @@ While **Search** has focus, `Ctrl+N` / `Ctrl+P` moves through the matching tasks
 - `fp` / `fc` — open the project or context sidebar
 - `/` or `Ctrl+K` — focus **Search** from the task list
 - `Ctrl+A` — activate **All** from the task list or sidebar (keeps the search text); in text fields, selects all text as usual
-- In a sidebar, `j` / `k`, `↓` / `↑`, or `Ctrl+N` / `Ctrl+P` moves between filters and `Space` toggles the active filter
+- In a sidebar, `j` / `k`, `↓` / `↑`, or `Ctrl+N` / `Ctrl+P` previews each filter in the task list; `Space` applies or removes the active filter
 - `D` — toggle task density
 - `S` — cycle the sort mode
 - `?` — open shortcut help
