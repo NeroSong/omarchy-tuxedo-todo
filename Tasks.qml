@@ -963,7 +963,8 @@ Panel {
         }
 
         Column {
-          width: parent.width - taskIcon.width - badgeMode.implicitWidth - settingsButton.width - parent.spacing * 3
+          width: parent.width - taskIcon.width - lineMode.implicitWidth - badgeMode.implicitWidth
+            - settingsButton.width - parent.spacing * 4
 
           Text {
             text: "Tasks"
@@ -978,6 +979,29 @@ Panel {
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+          }
+        }
+
+        Row {
+          id: lineMode
+          anchors.verticalCenter: parent.verticalCenter
+          spacing: Style.space(5)
+
+          Text {
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.twoLineDescriptions ? "Two lines" : "One line"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+          }
+
+          ToggleSwitch {
+            anchors.verticalCenter: parent.verticalCenter
+            checked: root.twoLineDescriptions
+            trackHeight: Style.space(18)
+            foreground: root.foreground
+            accent: Color.accent
+            onToggled: root.toggleDescriptionLines()
           }
         }
 
@@ -1040,6 +1064,33 @@ Panel {
         height: Style.space(34)
         spacing: Style.space(14)
 
+        Row {
+          id: scopeActions
+          spacing: Style.space(16)
+
+          Repeater {
+            model: [
+              { scope: "open", label: "Open" },
+              { scope: "all", label: "All" },
+              { scope: "due", label: "Due" },
+              { scope: "rec", label: "Rec" },
+              { scope: "done", label: "Done" }
+            ]
+            TextAction {
+              required property var modelData
+              label: modelData.label
+              selected: root.activeSearchScope === modelData.scope
+              onActivated: root.selectSearchScope(modelData.scope)
+            }
+          }
+        }
+
+        Item {
+          width: Math.max(0, parent.width - scopeActions.width - filterAction.width
+            - sortAction.width - parent.spacing * 3)
+          height: 1
+        }
+
         TextAction {
           id: filterAction
           iconText: "󰈲"
@@ -1048,58 +1099,6 @@ Panel {
           onActivated: root.filterSidebarOpen = !root.filterSidebarOpen
         }
         TextAction { id: sortAction; iconText: "󰒺"; label: "Sort"; onActivated: root.cycleSortMode() }
-
-        Item {
-          width: Math.max(0, parent.width - filterAction.width - sortAction.width
-            - lineMode.implicitWidth - parent.spacing * 3)
-          height: 1
-        }
-
-        Row {
-          id: lineMode
-          anchors.verticalCenter: parent.verticalCenter
-          spacing: Style.space(5)
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.twoLineDescriptions ? "Two lines" : "One line"
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
-          ToggleSwitch {
-            anchors.verticalCenter: parent.verticalCenter
-            checked: root.twoLineDescriptions
-            trackHeight: Style.space(18)
-            foreground: root.foreground
-            accent: Color.accent
-            onToggled: root.toggleDescriptionLines()
-          }
-        }
-      }
-      Row {
-        id: scopeRow
-        visible: root.panelMode === "tasks"
-        width: parent.width
-        height: Style.space(28)
-        spacing: Style.space(16)
-
-        Repeater {
-          model: [
-            { scope: "open", label: "Open" },
-            { scope: "all", label: "All" },
-            { scope: "due", label: "Due" },
-            { scope: "rec", label: "Rec" },
-            { scope: "done", label: "Done" }
-          ]
-          TextAction {
-            required property var modelData
-            label: modelData.label
-            selected: root.activeSearchScope === modelData.scope
-            onActivated: root.selectSearchScope(modelData.scope)
-          }
-        }
       }
 
       Rectangle { visible: root.panelMode === "tasks"; width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
@@ -1118,7 +1117,7 @@ Panel {
         id: taskArea
         visible: root.panelMode === "tasks"
         width: parent.width
-        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 443 : 397))
+        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 405 : 359))
 
         Rectangle {
           id: filterSidebar
