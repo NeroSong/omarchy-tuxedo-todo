@@ -1003,7 +1003,7 @@ Panel {
             - settingsButton.width - parent.spacing * 4
 
           Text {
-            text: "Tasks"
+            text: "Tuxedo Todo"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading

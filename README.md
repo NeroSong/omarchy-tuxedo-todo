@@ -1,23 +1,20 @@
-# Tuxedo Todo Panel
+# Tuxedo Todo
 
-A focused todo.txt task panel for Omarchy Quattro, powered by the [Tuxedo](https://github.com/webstonehq/tuxedo) command-line interface. Tuxedo Todo Panel places your open-task count in the bar and lets you browse and update your task file without leaving the desktop.
+**Your todo.txt workflow, right in the Omarchy bar.**
+
+A fast, keyboard-first task dashboard for Omarchy Quattro, powered by the [Tuxedo](https://github.com/webstonehq/tuxedo) command-line interface. Capture what is next, cut through the backlog, and see six months of momentum without leaving the desktop. Everything stays local and portable in plain-text `todo.txt` files.
 
 ## Features
 
-- Shows the number of open tasks in the bar, with an optional due-only badge
-- Searches tasks and filters them by due status, project (`+project`), or context (`@context`)
-- Sorts by due date, file order, or priority
-- Highlights due and overdue tasks and recognizes todo.txt priorities
-- Adds, edits, completes, and deletes tasks through Tuxedo
-- Shows a GitHub-style heatmap and top projects for the last six months, updated live when previewing project and context filters
-- Supports multi-select completion and deletion
-- Switches between compact one-line and two-line task descriptions
-- Watches the configured todo.txt file and refreshes when it changes
-- Follows the active Omarchy theme
+- **Know what needs attention** — See open and due counts in the bar, with clear priority, due-date, and overdue states.
+- **Find any task fast** — Fuzzy-search titles, projects, contexts, and metadata, then narrow the list with live filter previews.
+- **Stay keyboard-first** — Navigate, search, edit, complete, select, and delete tasks with Vim-inspired shortcuts.
+- **Turn completion into momentum** — Follow a GitHub-style six-month activity heatmap and see your most active projects update live.
+- **Keep it local and yours** — Portable plain-text tasks, instant file watching, no telemetry, and a look inherited from your Omarchy theme.
 
 ## Screenshot
 
-![Tuxedo Todo Panel](preview.png)
+![Tuxedo Todo](preview.png)
 
 ## Requirements
 
@@ -35,7 +32,7 @@ Install the plugin from GitHub and enable it immediately:
 omarchy plugin add https://github.com/lpanebr/omarchy-tuxedo-todo.git --enable
 ```
 
-The widget is registered as **Tuxedo Todo Panel** in the Productivity category. It supports one instance and defaults to the center section of the bar.
+The widget is registered as **Tuxedo Todo** in the Productivity category. It supports one instance and defaults to the center section of the bar.
 
 Interactive installation offers a left/center/right position selector (unless `--yes` is used). After installation, open **Settings → Bar position** to move the widget to another section.
 
@@ -117,7 +114,7 @@ For every Tuxedo action, the plugin sets `TODO_FILE` to the configured path and 
 
 ### File monitoring
 
-Tuxedo Todo Panel uses the bundled Python 3 standard-library helper and a native Linux inotify watcher to monitor the configured todo file. Changes are reloaded when detected, making monitoring event-driven and avoiding a periodic polling loop; there is no scan interval to configure.
+Tuxedo Todo uses the bundled Python 3 standard-library helper and a native Linux inotify watcher to monitor the configured todo file. Changes are reloaded when detected, making monitoring event-driven and avoiding a periodic polling loop; there is no scan interval to configure.
 
 The file is also reloaded when the component starts, whenever the panel opens, after a Tuxedo mutation exits, and after the configured todo path changes.
 
@@ -133,7 +130,7 @@ This removes the plugin, not your `todo.txt`, sibling `done.txt`, or saved state
 
 ## Security and data behavior
 
-Tuxedo Todo Panel works locally. The widget reads and watches the configured todo.txt file, invokes the locally installed `tuxedo` executable for changes, and writes its small JSON preferences file. Choosing a bar position explicitly invokes `omarchy bar move` with a fixed section argument; Omarchy persists that layout in its shell configuration. It does not include network requests, telemetry, account access, or cloud synchronization. Your task data is sent only to local processes started for the requested Tuxedo action. Task-supplied metadata is escaped before styled rendering, and task text is passed as process arguments without a shell.
+Tuxedo Todo works locally. The widget reads and watches the configured todo.txt file, invokes the locally installed `tuxedo` executable for changes, and writes its small JSON preferences file. Choosing a bar position explicitly invokes `omarchy bar move` with a fixed section argument; Omarchy persists that layout in its shell configuration. It does not include network requests, telemetry, account access, or cloud synchronization. Your task data is sent only to local processes started for the requested Tuxedo action. Task-supplied metadata is escaped before styled rendering, and task text is passed as process arguments without a shell.
 
 For safety, the configured todo path must name a regular file owned by the current user. Final symbolic links, FIFOs, devices, and other non-regular files are rejected. The maximum todo file size is 8 MiB, and each line is limited to 64 KiB. Files that exceed either limit are rejected rather than silently truncated, preserving the exact line numbers used by Tuxedo operations.
 
