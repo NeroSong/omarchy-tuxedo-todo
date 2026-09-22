@@ -42,6 +42,7 @@ Panel {
   property var contexts: []
   readonly property var projectCounts: Todo.counts(tasks, "projects")
   readonly property var contextCounts: Todo.counts(tasks, "contexts")
+  readonly property var completionActivity: Todo.completionHeatmap(completedTasks, todayIso(), 26)
   property string filterKind: "all"
   property string filterValue: ""
   property string searchText: ""
@@ -1117,7 +1118,7 @@ Panel {
         id: taskArea
         visible: root.panelMode === "tasks"
         width: parent.width
-        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 317 : 271))
+        height: Math.max(0, parent.height - Style.space(root.selectedCount > 0 ? 443 : 397))
 
         Rectangle {
           id: filterSidebar
@@ -1478,6 +1479,128 @@ Panel {
         Keys.onEscapePressed: root.close()
         Keys.onTabPressed: searchField.forceActiveFocus()
         Keys.onBacktabPressed: root.focusTaskList()
+      }
+
+      Column {
+        id: completionHeatmap
+        visible: root.panelMode === "tasks"
+        width: parent.width
+        height: Style.space(116)
+        spacing: Style.space(6)
+
+        Rectangle { width: parent.width; height: 1; color: root.dim; opacity: 0.35 }
+
+        Row {
+          width: parent.width
+          height: parent.height - Style.space(7)
+          spacing: Style.space(16)
+
+          Column {
+            width: Math.max(0, parent.width - activityChart.width - parent.spacing)
+            anchors.verticalCenter: parent.verticalCenter
+
+            Text {
+              text: String(root.completionActivity.total)
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.heading + 4
+              font.bold: true
+            }
+
+            Text {
+              width: parent.width
+              text: "completed in 6 months"
+              color: root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+          }
+
+          Column {
+            id: activityChart
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(3)
+
+            Row {
+              spacing: Style.space(5)
+
+              Item { width: Style.space(24); height: 1 }
+
+              Row {
+                spacing: Style.space(3)
+
+                Repeater {
+                  model: root.completionActivity.monthLabels
+
+                  Text {
+                    required property string modelData
+                    width: Style.space(9)
+                    text: modelData
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption - 2
+                  }
+                }
+              }
+            }
+
+            Row {
+              spacing: Style.space(5)
+
+              Column {
+                width: Style.space(24)
+                spacing: Style.space(3)
+
+                Repeater {
+                  model: ["", "Mon", "", "Wed", "", "Fri", ""]
+
+                  Text {
+                    required property string modelData
+                    width: Style.space(24)
+                    height: Style.space(9)
+                    verticalAlignment: Text.AlignVCenter
+                    text: modelData
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption - 2
+                  }
+                }
+              }
+
+              Grid {
+                id: activityGrid
+                rows: 7
+                flow: Grid.TopToBottom
+                spacing: Style.space(3)
+
+                Repeater {
+                  model: root.completionActivity.cells
+
+                  Rectangle {
+                    required property var modelData
+                    width: Style.space(9)
+                    height: width
+                    radius: Math.max(1, Style.cornerRadius / 3)
+                    color: modelData.level > 0 ? Color.accent : root.foreground
+                    opacity: modelData.future ? 0.04 : (modelData.level === 0 ? 0.12 : 0.28 + modelData.level * 0.18)
+
+                    ToolTip.visible: activityMouse.containsMouse && !modelData.future
+                    ToolTip.text: modelData.date + " · " + modelData.count
+                      + (modelData.count === 1 ? " task completed" : " tasks completed")
+                    ToolTip.delay: 250
+
+                    MouseArea {
+                      id: activityMouse
+                      anchors.fill: parent
+                      hoverEnabled: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
       }
 
       Row {

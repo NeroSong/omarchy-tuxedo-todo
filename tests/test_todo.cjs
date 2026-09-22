@@ -45,6 +45,49 @@ test('counts each task once per tag, including object prototype names', () => {
   assert.equal(todo.counts(tasks, 'contexts').work, 2);
 });
 
+test('builds a Sunday-aligned 13-week completion heatmap', () => {
+  const tasks = [
+    { completedDate: '2026-09-20' },
+    { completedDate: '2026-09-20' },
+    { completedDate: '2026-09-21' },
+    { completedDate: '2026-06-01' },
+    { completedDate: 'invalid' }
+  ];
+  const heatmap = todo.completionHeatmap(tasks, '2026-09-22', 13);
+  assert.equal(heatmap.cells.length, 91);
+  assert.equal(heatmap.startDate, '2026-06-28');
+  assert.equal(heatmap.endDate, '2026-09-22');
+  assert.equal(heatmap.total, 3);
+  assert.deepEqual(Array.from(heatmap.monthLabels.filter(Boolean)), ['Jul', 'Aug', 'Sep']);
+  assert.deepEqual(
+    Array.from(heatmap.cells.slice(-7), cell => [cell.date, cell.count, cell.level, cell.future]),
+    [
+      ['2026-09-20', 2, 2, false],
+      ['2026-09-21', 1, 1, false],
+      ['2026-09-22', 0, 0, false],
+      ['2026-09-23', 0, 0, true],
+      ['2026-09-24', 0, 0, true],
+      ['2026-09-25', 0, 0, true],
+      ['2026-09-26', 0, 0, true]
+    ]
+  );
+});
+
+test('labels the months represented by heatmap week columns', () => {
+  const heatmap = todo.completionHeatmap([], '2026-09-22', 26);
+  assert.equal(heatmap.cells.length, 182);
+  assert.equal(heatmap.monthLabels.length, 26);
+  assert.deepEqual(Array.from(heatmap.monthLabels.filter(Boolean)),
+    ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep']);
+});
+
+test('caps heatmap intensity at four completed tasks', () => {
+  const tasks = Array.from({ length: 7 }, () => ({ completedDate: '2026-09-22' }));
+  const cell = todo.completionHeatmap(tasks, '2026-09-22', 1).cells[2];
+  assert.equal(cell.count, 7);
+  assert.equal(cell.level, 4);
+});
+
 test('fuzzy search matches text, projects and contexts with AND semantics', () => {
   const task = todo.parseLine('Prepare quarterly invoice +EditoraCubo @DeepWork due:2026-09-30');
   assert.equal(todo.matchesSearch(task, 'prep invc'), true);

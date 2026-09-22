@@ -59,6 +59,57 @@ function counts(tasks, field) {
   return result
 }
 
+function localDateFromIso(value) {
+  var parts = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!parts) return null
+  var date = new Date(Number(parts[1]), Number(parts[2]) - 1, Number(parts[3]), 12)
+  if (date.getFullYear() !== Number(parts[1]) || date.getMonth() !== Number(parts[2]) - 1
+      || date.getDate() !== Number(parts[3])) return null
+  return date
+}
+
+function localDateIso(date) {
+  return date.getFullYear() + "-" + String(date.getMonth() + 1).padStart(2, "0")
+    + "-" + String(date.getDate()).padStart(2, "0")
+}
+
+function completionHeatmap(tasks, todayIso, weekCount) {
+  var today = localDateFromIso(todayIso) || new Date()
+  today = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 12)
+  var weeks = Math.max(1, Number(weekCount) || 13)
+  var start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - today.getDay() - (weeks - 1) * 7, 12)
+  var countsByDate = Object.create(null)
+  tasks.forEach(function(task) {
+    if (localDateFromIso(task.completedDate))
+      countsByDate[task.completedDate] = (countsByDate[task.completedDate] || 0) + 1
+  })
+
+  var cells = []
+  var monthLabels = []
+  var total = 0
+  var monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+  for (var week = 0; week < weeks; week++) {
+    var weekStart = new Date(start.getFullYear(), start.getMonth(), start.getDate() + week * 7, 12)
+    var label = ""
+    for (var day = 0; day < 7 && label === ""; day++) {
+      var weekDay = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + day, 12)
+      if (weekDay.getDate() === 1) label = monthNames[weekDay.getMonth()]
+    }
+    if (week === 0 && label === "") label = monthNames[weekStart.getMonth()]
+    monthLabels.push(label)
+  }
+  for (var i = 0; i < weeks * 7; i++) {
+    var date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i, 12)
+    var iso = localDateIso(date)
+    var future = date > today
+    var count = future ? 0 : (countsByDate[iso] || 0)
+    if (!future) total += count
+    cells.push({ date: iso, count: count, future: future, level: Math.min(4, count) })
+  }
+  return { cells: cells, monthLabels: monthLabels, total: total, weeks: weeks,
+    startDate: localDateIso(start), endDate: localDateIso(today) }
+}
+
 function fuzzyMatch(value, query) {
   var haystack = String(value).toLowerCase()
   var needle = String(query).toLowerCase()
