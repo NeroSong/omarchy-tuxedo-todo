@@ -91,6 +91,8 @@ Panel {
   readonly property var activityTasks: Todo.filterByFacet(completedTasks,
     effectiveFilterKind, effectiveFilterValue)
   readonly property var completionActivity: Todo.completionHeatmap(activityTasks, todayIso(), 26)
+  readonly property var topActivityProjects: Todo.topCompletedFacets(activityTasks, "projects",
+    completionActivity.startDate, completionActivity.endDate, 3)
   readonly property var activeTask: visibleTasks.length > 0 && activeTaskIndex >= 0
     ? visibleTasks[Math.min(activeTaskIndex, visibleTasks.length - 1)] : null
 
@@ -1533,6 +1535,7 @@ Panel {
           Column {
             width: Math.max(0, parent.width - activityChart.width - parent.spacing)
             anchors.verticalCenter: parent.verticalCenter
+            spacing: Style.space(1)
 
             Text {
               text: String(root.completionActivity.total)
@@ -1549,6 +1552,45 @@ Panel {
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
+            }
+
+            Item { width: 1; height: root.topActivityProjects.length > 0 ? Style.space(3) : 0 }
+
+            Text {
+              visible: root.topActivityProjects.length > 0
+              width: parent.width
+              text: "Top projects"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption - 1
+              font.bold: true
+            }
+
+            Repeater {
+              model: root.topActivityProjects
+
+              Row {
+                required property var modelData
+                width: parent.width
+                height: Style.space(12)
+
+                Text {
+                  width: parent.width - projectCount.width - Style.space(5)
+                  text: "+" + modelData.name
+                  color: Color.accent
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption - 2
+                  elide: Text.ElideRight
+                }
+
+                Text {
+                  id: projectCount
+                  text: String(modelData.count)
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption - 2
+                }
+              }
             }
           }
 

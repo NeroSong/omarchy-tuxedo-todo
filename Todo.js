@@ -116,6 +116,20 @@ function completionHeatmap(tasks, todayIso, weekCount) {
     startDate: localDateIso(start), endDate: localDateIso(today) }
 }
 
+function topCompletedFacets(tasks, field, startDate, endDate, limit) {
+  var facetCounts = Object.create(null)
+  tasks.forEach(function(task) {
+    if (!localDateFromIso(task.completedDate)
+        || task.completedDate < startDate || task.completedDate > endDate) return
+    task[field].forEach(function(value) { facetCounts[value] = (facetCounts[value] || 0) + 1 })
+  })
+  return Object.keys(facetCounts).map(function(value) {
+    return { name: value, count: facetCounts[value] }
+  }).sort(function(a, b) {
+    return b.count - a.count || a.name.localeCompare(b.name)
+  }).slice(0, Math.max(0, Number(limit) || 0))
+}
+
 function fuzzyMatch(value, query) {
   var haystack = String(value).toLowerCase()
   var needle = String(query).toLowerCase()

@@ -101,6 +101,18 @@ test('caps heatmap intensity at four completed tasks', () => {
   assert.equal(cell.level, 4);
 });
 
+test('ranks completed projects within the heatmap period', () => {
+  const tasks = [
+    todo.parseCompletedLine('x 2026-09-20 Read +books +leisure'),
+    todo.parseCompletedLine('x 2026-09-21 Write +books'),
+    todo.parseCompletedLine('x 2026-09-22 Review +work'),
+    todo.parseCompletedLine('x 2026-09-22 Plan +admin'),
+    todo.parseCompletedLine('x 2026-01-01 Old +books')
+  ];
+  assert.deepEqual(Array.from(todo.topCompletedFacets(tasks, 'projects', '2026-04-01', '2026-09-22', 3),
+    item => [item.name, item.count]), [['books', 2], ['admin', 1], ['leisure', 1]]);
+});
+
 test('fuzzy search matches text, projects and contexts with AND semantics', () => {
   const task = todo.parseLine('Prepare quarterly invoice +EditoraCubo @DeepWork due:2026-09-30');
   assert.equal(todo.matchesSearch(task, 'prep invc'), true);
