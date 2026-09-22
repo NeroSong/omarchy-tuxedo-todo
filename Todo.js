@@ -59,6 +59,12 @@ function counts(tasks, field) {
   return result
 }
 
+function filterByFacet(tasks, kind, value) {
+  if (kind !== "project" && kind !== "context") return tasks
+  var field = kind === "project" ? "projects" : "contexts"
+  return tasks.filter(function(task) { return task[field].indexOf(value) >= 0 })
+}
+
 function localDateFromIso(value) {
   var parts = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/)
   if (!parts) return null

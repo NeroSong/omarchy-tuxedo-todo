@@ -9,7 +9,7 @@ A focused todo.txt task panel for Omarchy Quattro, powered by the [Tuxedo](https
 - Sorts by due date, file order, or priority
 - Highlights due and overdue tasks and recognizes todo.txt priorities
 - Adds, edits, completes, and deletes tasks through Tuxedo
-- Shows a GitHub-style heatmap of tasks completed over the last six months
+- Shows a GitHub-style heatmap of tasks completed over the last six months, updated live when previewing project and context filters
 - Supports multi-select completion and deletion
 - Switches between compact one-line and two-line task descriptions
 - Watches the configured todo.txt file and refreshes when it changes

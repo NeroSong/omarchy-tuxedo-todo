@@ -45,6 +45,19 @@ test('counts each task once per tag, including object prototype names', () => {
   assert.equal(todo.counts(tasks, 'contexts').work, 2);
 });
 
+test('filters completed activity by project or context facets', () => {
+  const tasks = [
+    todo.parseCompletedLine('x 2026-09-20 Read +books @home'),
+    todo.parseCompletedLine('x 2026-09-21 Review +work @office'),
+    todo.parseCompletedLine('x 2026-09-22 Write +books @office')
+  ];
+  assert.deepEqual(Array.from(todo.filterByFacet(tasks, 'project', 'books'), task => task.displayText),
+    ['Read', 'Write']);
+  assert.deepEqual(Array.from(todo.filterByFacet(tasks, 'context', 'office'), task => task.displayText),
+    ['Review', 'Write']);
+  assert.equal(todo.filterByFacet(tasks, 'all', ''), tasks);
+});
+
 test('builds a Sunday-aligned 13-week completion heatmap', () => {
   const tasks = [
     { completedDate: '2026-09-20' },

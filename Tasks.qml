@@ -42,7 +42,6 @@ Panel {
   property var contexts: []
   readonly property var projectCounts: Todo.counts(tasks, "projects")
   readonly property var contextCounts: Todo.counts(tasks, "contexts")
-  readonly property var completionActivity: Todo.completionHeatmap(completedTasks, todayIso(), 26)
   property string filterKind: "all"
   property string filterValue: ""
   property string searchText: ""
@@ -89,6 +88,9 @@ Panel {
     && sidebarEntryCount > 0 ? previewFilterKind : filterKind
   readonly property string effectiveFilterValue: sidebarPreviewActive && filterSidebarOpen
     && sidebarEntryCount > 0 ? previewFilterValue : filterValue
+  readonly property var activityTasks: Todo.filterByFacet(completedTasks,
+    effectiveFilterKind, effectiveFilterValue)
+  readonly property var completionActivity: Todo.completionHeatmap(activityTasks, todayIso(), 26)
   readonly property var activeTask: visibleTasks.length > 0 && activeTaskIndex >= 0
     ? visibleTasks[Math.min(activeTaskIndex, visibleTasks.length - 1)] : null
 
